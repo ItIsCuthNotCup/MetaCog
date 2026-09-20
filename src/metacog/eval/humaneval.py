@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--thinker-api", choices=["chat", "completions"], default="chat")
     h.add_argument("--thinker-api-key", default=None)
     h.add_argument("--prefix-mode", choices=["assistant", "prompt"], default="assistant")
+    h.add_argument("--system-prompt", default=None)
     h.add_argument("--judge", choices=["jev", "reflex", "none"], default="reflex")
     h.add_argument("--judge-url", default=None)
     h.add_argument("--judge-model", default=None)
@@ -144,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         api=args.thinker_api,
         api_key=args.thinker_api_key,
         prefix_mode=args.prefix_mode,
+        system_prompt=args.system_prompt,
         timeout=args.thinker_timeout,
     )
     if args.judge == "none":

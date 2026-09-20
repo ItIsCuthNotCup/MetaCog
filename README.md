@@ -13,21 +13,27 @@ problem ──▶ thinker samples n paths ──▶ judge picks one ──▶ th
                     └─────────────────────────┘   (repeat until the winning path finishes)
 ```
 
-## Measured (HumanEval-164, MiniCPM5-2B thinker, 6 candidates/item, oracle unit tests)
+## Measured
 
-| arm | accuracy |
-|---|---|
-| thinker's first answer (no judge) | 0.555 |
-| thinker judging its own candidates | 0.524 (worse than no judge) |
-| **Reflex judge, per-candidate noul** (local, MIT, $0) | **0.689** |
-| Reflex judge, one-shot choice | 0.671 |
-| Jev judge, one-shot choice | 0.726 |
-| **Jev judge, per-candidate noul** | **0.756** |
-| ceiling: any of 6 candidates passes | 0.793 |
+MiniCPM5-2B thinker, separate judge, oracle grading. Two task families, same pattern twice.
 
-One task family, n=164; the Reflex–Jev gap is within noise (McNemar p=0.11). Reflex
-rescued 36 % of the items where the first answer failed. Details, provenance and limits in
-[docs/METHOD.md](docs/METHOD.md).
+| arm | HumanEval (164 tasks, 6 candidates) | GSM8K (84/200 so far, 10 candidates) |
+|---|---|---|
+| thinker's single answer (no judge) | 0.555 | 0.738 |
+| majority vote over candidates (no judge) | — | 0.833 |
+| thinker judging its own candidates | 0.524 (worse than no judge) | — |
+| **Reflex judge, per-candidate noul** (local, MIT, $0) | **0.689** | not yet run |
+| Reflex judge, one-shot choice | 0.671 | — |
+| Jev judge, one-shot choice | 0.726 | 0.869 |
+| **Jev judge, per-candidate noul** | **0.756** | **0.905** |
+| ceiling: any candidate passes | 0.793 | 0.976 |
+
+The gain comes from *choosing*, not from thinking more: majority vote helps, a separate
+judge helps more, and the thinker grading itself is worse than no judge at all. The
+Reflex–Jev gap is within noise (McNemar p=0.11, n=164). Reflex rescued 36 % of the items
+where the first answer failed. Judge confidence was *not* a usable "send to a human"
+signal. Samples are modest — directional, not gospel. Full HumanEval table, provenance and
+limits in [docs/METHOD.md](docs/METHOD.md).
 
 ## Install
 
@@ -78,6 +84,42 @@ CLI:
 ```bash
 metacog solve "…problem…" --thinker-url http://localhost:8000 --thinker-model X --judge reflex
 ```
+
+## Bring your own model
+
+MetaCog never touches weights; it only needs something that can sample text.
+
+| you have | use |
+|---|---|
+| vLLM / llama.cpp / Ollama / LM Studio / any OpenAI-compatible server | `OpenAICompatThinker(base_url, model)` |
+| OpenAI, Together, Groq, OpenRouter, … | `OpenAICompatThinker("https://api.openai.com", model="gpt-4o-mini", api_key=…)` |
+| a Hugging Face checkpoint in-process | `TransformersThinker("openbmb/MiniCPM5-2B")` (`pip install -e ".[hf]"`) |
+| anything else | any object with `generate(problem, prefix, *, n, max_tokens, temperature, stop) -> list[Generation]` |
+
+```python
+from metacog import Generation
+
+
+class MyThinker:
+    def generate(self, problem, prefix, *, n, max_tokens, temperature, stop=None):
+        texts = my_model.sample(
+            problem + prefix, n=n, max_new_tokens=max_tokens, temperature=temperature
+        )
+        return [Generation(text=t, finished=True) for t in texts]
+
+
+mc = MetaCog(MyThinker(), SystemOneJudge.jev(), Config(mode="best_of_n", n_paths=4))
+```
+
+`OpenAICompatThinker` tolerates imperfect servers: ones that ignore `n` (falls back to
+sequential sampling), report `finish_reason="stop"` on truncated output (repaired from
+`usage`), return HTTP 200 with an `{"error": …}` body, or drop the connection (retried).
+If your server cannot continue a partial assistant message, use `mode="best_of_n"` or
+`prefix_mode="prompt"`.
+
+The judge is likewise pluggable: any object with `score(problem, candidates) -> Verdict`
+(and `choose` for the comparative strategy) works. The one rule: **the judge must not be
+the thinker** — self-grading measured worse than no judge.
 
 ## Evaluate
 

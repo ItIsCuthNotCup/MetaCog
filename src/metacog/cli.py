@@ -17,6 +17,7 @@ def _build_thinker(args) -> OpenAICompatThinker:
         api=args.thinker_api,
         api_key=args.thinker_api_key,
         system_prompt=args.system_prompt,
+        prefix_mode=args.prefix_mode,
     )
 
 
@@ -39,6 +40,13 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--thinker-api", choices=["chat", "completions"], default="chat")
     p.add_argument("--thinker-api-key", default=None)
     p.add_argument("--system-prompt", default=None)
+    p.add_argument(
+        "--prefix-mode",
+        choices=["assistant", "prompt"],
+        default="assistant",
+        help="how stepwise prefixes are sent: trailing assistant message "
+        "(vLLM prefill) or folded into the user turn",
+    )
     p.add_argument("--judge", choices=["jev", "reflex"], default="reflex")
     p.add_argument("--judge-url", default=None)
     p.add_argument("--judge-model", default=None)

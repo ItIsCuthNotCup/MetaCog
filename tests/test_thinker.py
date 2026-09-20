@@ -129,6 +129,108 @@ def test_http_error_raises_thinker_error_with_body():
         t.generate("prob", "", n=1, max_tokens=8, temperature=0.0)
 
 
+def test_server_ignoring_n_falls_back_to_sequential():
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body["n"])
+        return httpx.Response(
+            200,
+            json={
+                # always returns exactly one choice, whatever n was asked for
+                "choices": [{"text": f"gen{len(bodies)}", "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 5},
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    gens = t.generate("p", "", n=3, max_tokens=8, temperature=0.7)
+    assert len(gens) == 3
+    assert bodies == [3, 1, 1]  # first ask for 3, then top up with n=1
+    assert t.supports_n is False
+
+    bodies.clear()
+    t.generate("p", "", n=2, max_tokens=8, temperature=0.7)
+    assert bodies == [1, 1]  # later calls go straight to sequential
+
+
+def test_finish_reason_stop_but_token_truncated_is_unfinished():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"text": "cut off mid-sen", "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 8},  # == max_tokens -> truncated
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.7)
+    assert not gens[0].finished
+
+
+def test_finish_reason_stop_fewer_tokens_is_finished():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"text": "done.", "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 3},
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.7)
+    assert gens[0].finished
+
+
+def test_stop_string_truncates_and_marks_finished():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"text": "answer\n\nSTOP here is junk", "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 8},  # would look truncated otherwise
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.7, stop=["STOP"])
+    assert gens[0].text == "answer\n\n"
+    assert gens[0].finished
+
+
+def test_prefix_mode_prompt_folds_prefix_into_user_turn():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "cont"}, "finish_reason": "stop"}]},
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat", prefix_mode="prompt")
+    t.generate("the problem", "partial answer", n=1, max_tokens=16, temperature=0.2)
+    body = seen["body"]
+    assert len(body["messages"]) == 1
+    assert body["messages"][0]["role"] == "user"
+    assert "the problem" in body["messages"][0]["content"]
+    assert "partial answer" in body["messages"][0]["content"]
+    assert "Continue the following partial solution" in body["messages"][0]["content"]
+    assert "continue_final_message" not in body
+
+
+def test_http_200_with_error_body_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"error": "completions not supported"})
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    with pytest.raises(ThinkerError, match="completions not supported"):
+        t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+
+
 def test_bearer_header_sent_when_key():
     seen = {}
 

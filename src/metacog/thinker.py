@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import Literal, Protocol
 
 import httpx
 
 from .types import Generation
-
-if TYPE_CHECKING:  # pragma: no cover
-    pass
 
 
 class ThinkerError(Exception):

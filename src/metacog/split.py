@@ -1,8 +1,10 @@
 """Split a single generation that wanders through several approaches into paths.
 
 Some models (e.g. MiniCPM) produce "Alternatively, ... / Approach 2: ..." inside one
-sample rather than committing. ``split_paths`` cuts those into self-contained paths,
-each prefixed with the shared preamble before the first marker. Pure and deterministic.
+sample rather than committing. ``split_paths`` cuts those into self-contained paths.
+If the text before the first marker is long enough to stand alone it is itself path 1;
+otherwise it is a shared preamble prepended to each marker piece (the judge sees the
+problem separately anyway). Pure and deterministic.
 """
 
 from __future__ import annotations
@@ -58,11 +60,23 @@ def _find_marker_offsets(text: str, markers: list[str]) -> list[int]:
 def split_paths(text: str, markers: list[str] | None = None) -> list[str]:
     markers = markers if markers is not None else DEFAULT_MARKERS
     offsets = _find_marker_offsets(text, markers)
-    if len(offsets) < 2:
+    if not offsets:
         return [text]
-    preamble = text[: offsets[0]].rstrip()
-    pieces = [text[a:b].strip() for a, b in zip(offsets, offsets[1:] + [len(text)], strict=True)]
-    pieces = [p for p in pieces if p]
-    if len(pieces) < 2 or any(len(p) < MIN_PIECE_CHARS for p in pieces):
+    first = text[: offsets[0]].strip()
+    pieces = [
+        p
+        for p in (
+            text[a:b].strip() for a, b in zip(offsets, offsets[1:] + [len(text)], strict=True)
+        )
+        if p
+    ]
+    if len(first) >= MIN_PIECE_CHARS:
+        # The opening segment is itself a complete approach -> path 1, no preamble.
+        paths = [first, *pieces]
+        preamble = ""
+    else:
+        paths = pieces
+        preamble = first
+    if len(paths) < 2 or any(len(p) < MIN_PIECE_CHARS for p in paths):
         return [text]
-    return [f"{preamble}\n\n{p}" if preamble else p for p in pieces]
+    return [f"{preamble}\n\n{p}" for p in paths] if preamble else paths

@@ -22,6 +22,9 @@ def _est_tokens(text: str) -> int:
 
 class Config(BaseModel):
     mode: Literal["best_of_n", "stepwise"] = "stepwise"
+    # noul: one isolated "is this correct?" request per candidate (no cap);
+    # choice: one-shot pick over all candidates (max 26).
+    strategy: Literal["noul", "choice"] = "noul"
     n_paths: int = 4  # samples per kept prefix per step
     keep_top_k: int = 1  # beam width after judging
     step_tokens: int = 256  # stepwise: tokens per extension
@@ -50,12 +53,15 @@ class MetaCog:
             full = prefix + g.text
             cands.append(Candidate(text=full, finished=g.finished, source="sample", parent=idx))
             if self.config.split_generations:
-                for piece in split_paths(g.text):
-                    if piece != g.text.strip():
+                pieces = split_paths(g.text)
+                for i, piece in enumerate(pieces):
+                    if len(pieces) > 1:
+                        # Only the last piece can be finished; earlier alternatives
+                        # were abandoned mid-generation by definition.
                         cands.append(
                             Candidate(
                                 text=prefix + piece,
-                                finished=g.finished,
+                                finished=g.finished if i == len(pieces) - 1 else False,
                                 source="split",
                                 parent=idx,
                             )
@@ -66,6 +72,14 @@ class MetaCog:
         """Judge candidates; more than 26 are truncated in source order (samples first)."""
         if len(cands) == 1:
             return Verdict(probabilities=[1.0], choice=0, confidence=1.0)
+        if self.config.strategy == "noul":
+            v = self.judge.score(
+                problem,
+                [c.text for c in cands],
+                instructions=self.config.judge_instructions,
+            )
+            trace.judge_calls += len(cands)
+            return v
         judged = cands[:MAX_JUDGE_CANDIDATES]
         v = self.judge.choose(
             problem,

@@ -48,6 +48,18 @@ class FakeJudge:
         probs[idx] = 1.0
         return Verdict(probabilities=probs, choice=idx, confidence=self.confidence)
 
+    def score(self, problem, candidates, *, instructions=None):
+        self.calls.append({"kind": "score", "problem": problem, "candidates": list(candidates)})
+        raw = [1.0 if "CORRECT" in c else 0.1 for c in candidates]
+        total = sum(raw)
+        choice = max(range(len(raw)), key=lambda i: raw[i])
+        return Verdict(
+            probabilities=[p / total for p in raw],
+            choice=choice,
+            confidence=self.confidence,
+            raw=raw,
+        )
+
     def assess(self, problem, candidate, *, questions):
         self.assess_calls.append({"problem": problem, "questions": dict(questions)})
         return {k: 0.9 for k in questions}

@@ -3,6 +3,7 @@
 from .controller import Config, MetaCog
 from .judge import (
     DEFAULT_CHOOSE_INSTRUCTIONS,
+    DEFAULT_SCORE_INSTRUCTIONS,
     FINISHED_QUESTIONS,
     Judge,
     JudgeError,
@@ -32,6 +33,7 @@ __all__ = [
     "ThinkerError",
     "split_paths",
     "DEFAULT_CHOOSE_INSTRUCTIONS",
+    "DEFAULT_SCORE_INSTRUCTIONS",
     "FINISHED_QUESTIONS",
     "__version__",
 ]

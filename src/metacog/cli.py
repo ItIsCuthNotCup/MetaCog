@@ -43,6 +43,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--judge-url", default=None)
     p.add_argument("--judge-model", default=None)
     p.add_argument("--mode", choices=["best_of_n", "stepwise"], default="stepwise")
+    p.add_argument("--strategy", choices=["noul", "choice"], default="noul")
     p.add_argument("--n", type=int, default=4, dest="n_paths")
     p.add_argument("--keep-top-k", type=int, default=1)
     p.add_argument("--step-tokens", type=int, default=256)
@@ -58,6 +59,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
 def _config(args) -> Config:
     return Config(
         mode=args.mode,
+        strategy=args.strategy,
         n_paths=args.n_paths,
         keep_top_k=args.keep_top_k,
         step_tokens=args.step_tokens,

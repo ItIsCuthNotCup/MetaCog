@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--judge-url", default=None)
     h.add_argument("--judge-model", default=None)
     h.add_argument("--mode", choices=["best_of_n", "stepwise"], default="stepwise")
+    h.add_argument("--strategy", choices=["noul", "choice"], default="noul")
     h.add_argument("--n", type=int, default=4, dest="n_paths")
     h.add_argument("--limit", type=int, default=None)
     h.add_argument("--data", default=None, help="local JSONL with HumanEval fields")
@@ -154,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             judge,
             Config(
                 mode=args.mode,
+                strategy=args.strategy,
                 n_paths=args.n_paths,
                 step_tokens=args.step_tokens,
                 max_steps=args.max_steps,

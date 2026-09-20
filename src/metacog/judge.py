@@ -21,6 +21,12 @@ DEFAULT_CHOOSE_INSTRUCTIONS = (
     "and how directly it addresses the problem, not its length or style."
 )
 
+DEFAULT_SCORE_INSTRUCTIONS = (
+    "`path` is one candidate solution or reasoning path for `problem`. Is its final answer "
+    "correct (or, if it is unfinished, is it on track to reach a correct answer)? Judge the "
+    "substance, not the length or style."
+)
+
 FINISHED_QUESTIONS = {
     "is_complete": (
         "Does `path` reach a definite final answer to `problem` (not just a plan or partial work)?"
@@ -39,6 +45,14 @@ class Judge(Protocol):
     """The System-One judge that scores candidate paths."""
 
     def choose(
+        self,
+        problem: str,
+        candidates: list[str],
+        *,
+        instructions: str | None = None,
+    ) -> Verdict: ...
+
+    def score(
         self,
         problem: str,
         candidates: list[str],
@@ -162,6 +176,43 @@ class SystemOneJudge:
             probabilities=probs,
             choice=labels.index(answer["choice"]),
             confidence=answer.get("confidence", 0.0),
+        )
+
+    def score(
+        self,
+        problem: str,
+        candidates: list[str],
+        *,
+        instructions: str | None = None,
+    ) -> Verdict:
+        """Score each candidate in isolation with a noul question (one request per
+        candidate, so the judge never sees the other paths). Returns a Verdict whose
+        ``probabilities`` are the raw P(correct) values normalised to sum 1 (uniform
+        if all zero); ``raw`` holds the unnormalised values."""
+        raw: list[float] = []
+        for cand in candidates:
+            body: dict = {
+                "model": self.model,
+                "state": {"problem": problem, "path": self._truncate(cand)},
+                "questions": {
+                    "is_correct": {
+                        "type": "noul",
+                        "instructions": instructions or DEFAULT_SCORE_INSTRUCTIONS,
+                    }
+                },
+            }
+            if self.permutations is not None:
+                body["permutations"] = self.permutations
+            data = self._post(body)
+            raw.append(data["answers"]["is_correct"]["noul"])
+        total = sum(raw)
+        probs = [p / total for p in raw] if total else [1.0 / len(raw)] * len(raw)
+        choice = max(range(len(raw)), key=lambda i: raw[i]) if raw else 0
+        return Verdict(
+            probabilities=probs,
+            choice=choice,
+            confidence=max(raw) if raw else 0.0,
+            raw=raw,
         )
 
     def assess(

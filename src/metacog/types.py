@@ -21,6 +21,7 @@ class Verdict(BaseModel):
     probabilities: list[float]
     choice: int
     confidence: float
+    raw: list[float] | None = None  # unnormalised scores, when produced by noul scoring
 
 
 class Candidate(BaseModel):

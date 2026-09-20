@@ -18,6 +18,7 @@ def _build_thinker(args) -> OpenAICompatThinker:
         api_key=args.thinker_api_key,
         system_prompt=args.system_prompt,
         prefix_mode=args.prefix_mode,
+        timeout=args.thinker_timeout,
     )
 
 
@@ -39,6 +40,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--thinker-model", required=True)
     p.add_argument("--thinker-api", choices=["chat", "completions"], default="chat")
     p.add_argument("--thinker-api-key", default=None)
+    p.add_argument("--thinker-timeout", type=float, default=600.0)
     p.add_argument("--system-prompt", default=None)
     p.add_argument(
         "--prefix-mode",

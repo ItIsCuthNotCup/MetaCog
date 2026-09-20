@@ -231,6 +231,35 @@ def test_http_200_with_error_body_raises():
         t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
 
 
+def test_transport_error_retried_then_succeeds():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("dropped", request=request)
+        return httpx.Response(200, json={"choices": [{"text": "x", "finish_reason": "stop"}]})
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert len(gens) == 1
+    assert calls["n"] == 2
+
+
+def test_transport_error_exhaustion_raises(monkeypatch):
+    monkeypatch.setattr("metacog.thinker.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.RemoteProtocolError("Server disconnected", request=request)
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    with pytest.raises(ThinkerError, match="transport error"):
+        t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert calls["n"] == 3  # initial + max_retries(2)
+
+
 def test_bearer_header_sent_when_key():
     seen = {}
 

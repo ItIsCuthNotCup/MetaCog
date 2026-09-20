@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Literal, Protocol
 
 import httpx
@@ -64,10 +65,11 @@ class OpenAICompatThinker:
         api_key: str | None = None,
         api: Literal["chat", "completions"] = "chat",
         system_prompt: str | None = None,
-        timeout: float = 120.0,
+        timeout: float = 600.0,
         extra_body: dict | None = None,
         prefix_mode: Literal["assistant", "prompt"] = "assistant",
         supports_n: bool = True,
+        max_retries: int = 2,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -78,6 +80,7 @@ class OpenAICompatThinker:
         self.extra_body = extra_body or {}
         self.prefix_mode = prefix_mode
         self.supports_n = supports_n
+        self.max_retries = max_retries
         self._client = client or httpx.Client(timeout=timeout)
 
     def _headers(self) -> dict[str, str]:
@@ -87,7 +90,19 @@ class OpenAICompatThinker:
         return h
 
     def _post(self, path: str, body: dict) -> dict:
-        resp = self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
+        resp = None
+        # Retry transient transport failures (disconnects, read timeouts, refused
+        # connections) with a short backoff: 1s, 2s, ... up to max_retries retries.
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = self._client.post(
+                    f"{self.base_url}{path}", json=body, headers=self._headers()
+                )
+                break
+            except httpx.TransportError as e:
+                if attempt >= self.max_retries:
+                    raise ThinkerError(f"{path} -> transport error: {e}") from e
+                time.sleep(attempt + 1)
         if resp.status_code >= 400:
             raise ThinkerError(f"{path} -> HTTP {resp.status_code}: {resp.text}")
         data = resp.json()

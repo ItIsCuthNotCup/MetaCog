@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..controller import Config, MetaCog
 from ..judge import SystemOneJudge
@@ -67,7 +67,7 @@ def _load_tasks(data: str | None, limit: int | None) -> list[dict]:
     else:
         from datasets import load_dataset  # lazy: requires the ``eval`` extra
 
-        tasks = list(load_dataset("openai_humaneval", split="test"))
+        tasks = list(load_dataset("openai/openai_humaneval", split="test"))
     return tasks[:limit] if limit else tasks
 
 
@@ -97,13 +97,16 @@ def _trace_summary(trace: Trace) -> dict:
 class _BaselineMetaCog:
     """--judge none: single greedy sample, no judging."""
 
-    def __init__(self, thinker: OpenAICompatThinker):
+    def __init__(self, thinker: OpenAICompatThinker, max_tokens: int = 1024):
         self.thinker = thinker
+        self.max_tokens = max_tokens
 
     def run(self, problem: str):
         from ..types import Result
 
-        gens = self.thinker.generate(problem, "", n=1, max_tokens=2048, temperature=0.0, stop=None)
+        gens = self.thinker.generate(
+            problem, "", n=1, max_tokens=self.max_tokens, temperature=0.0, stop=None
+        )
         trace = Trace(thinker_calls=1, thinker_tokens=sum(g.tokens for g in gens))
         return Result(answer=gens[0].text, finished=gens[0].finished, trace=trace)
 
@@ -127,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--data", default=None, help="local JSONL with HumanEval fields")
     h.add_argument("--out", default="runs/humaneval.jsonl")
     h.add_argument("--workers", type=int, default=1)
+    h.add_argument("--max-tokens", type=int, default=1024)
+    h.add_argument("--thinker-timeout", type=float, default=600.0)
     h.add_argument("--step-tokens", type=int, default=256)
     h.add_argument("--max-steps", type=int, default=8)
     h.add_argument("--temperature", type=float, default=0.8)
@@ -139,9 +144,10 @@ def main(argv: list[str] | None = None) -> int:
         api=args.thinker_api,
         api_key=args.thinker_api_key,
         prefix_mode=args.prefix_mode,
+        timeout=args.thinker_timeout,
     )
     if args.judge == "none":
-        mc: MetaCog | _BaselineMetaCog = _BaselineMetaCog(thinker)
+        mc: MetaCog | _BaselineMetaCog = _BaselineMetaCog(thinker, args.max_tokens)
     else:
         if args.judge == "jev":
             judge = SystemOneJudge.jev(model=args.judge_model or "jev-latest")
@@ -160,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                 strategy=args.strategy,
                 n_paths=args.n_paths,
                 step_tokens=args.step_tokens,
+                max_tokens=args.max_tokens,
                 max_steps=args.max_steps,
                 temperature=args.temperature,
             ),
@@ -171,18 +178,28 @@ def main(argv: list[str] | None = None) -> int:
         os.makedirs(out_dir, exist_ok=True)
 
     results: list[dict] = []
-    if args.workers > 1:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            results = list(pool.map(lambda t: _run_task(t, mc), tasks))
-    else:
-        for t in tasks:
-            r = _run_task(t, mc)
-            results.append(r)
-            print(f"{r['task_id']}: {'PASS' if r['passed'] else 'FAIL'}", flush=True)
-
-    with open(args.out, "w") as f:
-        for r in results:
-            f.write(json.dumps(r) + "\n")
+    passed = 0
+    with open(args.out, "w") as f:  # incremental: each line lands as the task finishes
+        if args.workers > 1:
+            with ThreadPoolExecutor(max_workers=args.workers) as pool:
+                futures = [pool.submit(_run_task, t, mc) for t in tasks]
+                for fut in as_completed(futures):
+                    r = fut.result()
+                    results.append(r)
+                    f.write(json.dumps(r) + "\n")
+                    f.flush()
+        else:
+            for t in tasks:
+                r = _run_task(t, mc)
+                results.append(r)
+                f.write(json.dumps(r) + "\n")
+                f.flush()
+                passed += r["passed"]
+                print(
+                    f"{r['task_id']}: {'PASS' if r['passed'] else 'FAIL'} "
+                    f"({passed}/{len(results)})",
+                    flush=True,
+                )
     passed = sum(1 for r in results if r["passed"])
     print(f"pass@1 = {passed}/{len(results)}")
     return 0

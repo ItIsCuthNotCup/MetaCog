@@ -11,6 +11,9 @@
   standard response shape.
 - `best_of_n` never commits to an unfinished candidate — finished paths outrank
   higher-scored truncated ones.
+- `Config.greedy_anchor` keeps a temperature-0 sample in the candidate pool
+  (source `"greedy"`), so the judge can never do worse than the baseline for
+  lack of the option.
 - Live multi-model demo + self-contained HTML renderer in `examples/`
   (`live_demo.py`, `render_demo.py`).
 

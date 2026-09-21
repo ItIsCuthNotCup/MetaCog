@@ -26,6 +26,8 @@ class Config(BaseModel):
     # choice: one-shot pick over all candidates (max 26).
     strategy: Literal["noul", "choice"] = "noul"
     n_paths: int = 4  # samples per kept prefix per step
+    # best_of_n: one of the n_paths candidates is a temperature-0 sample
+    greedy_anchor: bool = False
     keep_top_k: int = 1  # beam width after judging
     step_tokens: int = 256  # stepwise: tokens per extension
     max_steps: int = 8
@@ -46,12 +48,14 @@ class MetaCog:
 
     # -- internals -----------------------------------------------------------
 
-    def _expand(self, gens, prefix: str) -> list[Candidate]:
+    def _expand(
+        self, gens, prefix: str, *, source: Literal["sample", "greedy"] = "sample"
+    ) -> list[Candidate]:
         """Turn raw generations (continuations of ``prefix``) into candidates."""
         cands: list[Candidate] = []
         for idx, g in enumerate(gens):
             full = prefix + g.text
-            cands.append(Candidate(text=full, finished=g.finished, source="sample", parent=idx))
+            cands.append(Candidate(text=full, finished=g.finished, source=source, parent=idx))
             if self.config.split_generations:
                 pieces = split_paths(g.text)
                 for i, piece in enumerate(pieces):
@@ -132,15 +136,28 @@ class MetaCog:
 
     def _best_of_n(self, problem: str) -> Result:
         cfg, trace = self.config, Trace()
-        gens = self._generate(
-            problem,
-            "",
-            n=cfg.n_paths,
-            max_tokens=cfg.max_tokens,
-            temperature=cfg.temperature,
-            trace=trace,
-        )
-        cands = self._expand(gens, "")
+        cands: list[Candidate] = []
+        if cfg.greedy_anchor:
+            greedy = self._generate(
+                problem,
+                "",
+                n=1,
+                max_tokens=cfg.max_tokens,
+                temperature=0.0,
+                trace=trace,
+            )
+            cands.extend(self._expand(greedy, "", source="greedy"))
+        n_sampled = cfg.n_paths - 1 if cfg.greedy_anchor else cfg.n_paths
+        if n_sampled:
+            gens = self._generate(
+                problem,
+                "",
+                n=n_sampled,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                trace=trace,
+            )
+            cands.extend(self._expand(gens, ""))
         verdict = self._verdict(problem, cands, trace)
         # A finished candidate always outranks an unfinished one (a truncated sample
         # or an abandoned split-off path has no final answer to commit to).

@@ -63,6 +63,8 @@ benchmark — most problems are too easy to separate the arms.
 
 MetaCog never did worse than the baseline; every rescue was a problem where the baseline
 was wrong and Jev picked a correct candidate out of a disagreeing set.
+`greedy_anchor=True` now keeps the greedy answer in the candidate pool, so the judge can
+never do worse than baseline for lack of the option.
 
 ## Install
 

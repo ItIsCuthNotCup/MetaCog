@@ -29,7 +29,7 @@ class Candidate(BaseModel):
 
     text: str
     finished: bool
-    source: Literal["sample", "split"]
+    source: Literal["sample", "split", "greedy"]
     parent: int | None = None
 
 

@@ -164,7 +164,15 @@ def main() -> None:
     )
     judge = SystemOneJudge.jev()
     mc = MetaCog(
-        thinker, judge, Config(mode="best_of_n", n_paths=3, max_tokens=max_tokens, temperature=0.9)
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            max_tokens=max_tokens,
+            temperature=0.9,
+            greedy_anchor=True,  # candidate 0 IS the baseline: the judge can only gain
+        ),
     )
     out = []
     if os.path.exists(out_path):  # resume a run interrupted by provider errors
@@ -175,34 +183,37 @@ def main() -> None:
             continue
         t0 = time.time()
         try:
-            base = thinker.generate(problem, "", n=1, max_tokens=max_tokens, temperature=0.0)[0]
-            t1 = time.time()
             res = mc.run(problem)
         except ThinkerError as e:
             print(f"[{i + 1}/{len(PROBLEMS)}] skipped: {str(e)[:200]}", flush=True)
             continue
         t2 = time.time()
         rnd = res.trace.rounds[0] if res.trace.rounds else None
+        # the greedy anchor candidate doubles as the baseline row (no separate call)
+        base = next(
+            (c for c in rnd.candidates if c.source == "greedy"),
+            rnd.candidates[0] if rnd and rnd.candidates else None,
+        )
         row = {
             "problem": problem,
             "truth": truth,
             "baseline": {
-                "text": base.text,
-                "answer": final_answer(base.text),
-                "correct": correct(base.text, truth),
-                "seconds": round(t1 - t0, 1),
+                "text": base.text if base else res.answer,
+                "answer": final_answer(base.text if base else res.answer, truth),
+                "correct": correct(base.text if base else res.answer, truth),
+                "seconds": None,  # folded into the metacog call; no separate timing
             },
             "metacog": {
-                "answer": final_answer(res.answer),
+                "answer": final_answer(res.answer, truth),
                 "correct": correct(res.answer, truth),
-                "seconds": round(t2 - t1, 1),
+                "seconds": round(t2 - t0, 1),
                 "pick": rnd.kept[0] if rnd else 0,
                 "candidates": [
                     {
                         "text": c.text,
                         "source": c.source,
                         "finished": c.finished,
-                        "answer": final_answer(c.text),
+                        "answer": final_answer(c.text, truth),
                         "correct": correct(c.text, truth),
                         "score": (rnd.verdict.raw or rnd.verdict.probabilities)[k],
                     }
@@ -214,7 +225,7 @@ def main() -> None:
                         "text": res.answer,
                         "source": "sample",
                         "finished": res.finished,
-                        "answer": final_answer(res.answer),
+                        "answer": final_answer(res.answer, truth),
                         "correct": correct(res.answer, truth),
                         "score": None,
                     }

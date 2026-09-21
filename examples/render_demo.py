@@ -80,15 +80,17 @@ def render_run(d):
     ]
     for i, r in enumerate(rows, 1):
         b, m = r["baseline"], r["metacog"]
+        bsec = f"{b['seconds']}s" if b["seconds"] is not None else "—"
+        msec = f"{m['seconds']}s" if m["seconds"] is not None else "—"
         interesting = (
             b["correct"] != m["correct"] or len({c["answer"] for c in m["candidates"]}) > 1
         )
         flag = ' <span class="flag">candidates disagree</span>' if interesting else ""
         out.append(
             f'<div class="prob"><div class="q">{i}. {esc(r["problem"])}</div><div class="truth">ground truth: <b>{esc(r["truth"])}</b>{flag}</div><div class="cols"><div>'
-            f'<h3>Baseline &nbsp;{badge(b["correct"])} <span class="tag">answer {esc(b["answer"])}</span> <span class="tag">{b["seconds"]}s</span></h3>'
+            f'<h3>Baseline &nbsp;{badge(b["correct"])} <span class="tag">answer {esc(b["answer"])}</span> <span class="tag">{bsec}</span></h3>'
             f'<div class="cand"><pre>{esc(b["text"])}</pre></div></div><div>'
-            f'<h3>MetaCog &nbsp;{badge(m["correct"])} <span class="tag">answer {esc(m["answer"])}</span> <span class="tag">{m["seconds"]}s · {m["judge_calls"]} Jev calls</span></h3>'
+            f'<h3>MetaCog &nbsp;{badge(m["correct"])} <span class="tag">answer {esc(m["answer"])}</span> <span class="tag">{msec} · {m["judge_calls"]} Jev calls</span></h3>'
         )
         for k, c in enumerate(m["candidates"]):
             sc = "–" if c["score"] is None else f"{c['score']:.2f}"

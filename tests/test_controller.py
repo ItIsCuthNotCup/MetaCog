@@ -45,6 +45,51 @@ def test_best_of_n_prefers_finished_over_higher_scored_unfinished(strategy):
 
 
 @pytest.mark.parametrize("strategy", ["noul", "choice"])
+def test_greedy_anchor_adds_temperature0_candidate_first(strategy):
+    thinker = FakeThinker(
+        [
+            [gen("greedy CORRECT answer", finished=True)],
+            [gen("sampled A"), gen("sampled B")],
+        ]
+    )
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            split_generations=False,
+            greedy_anchor=True,
+            strategy=strategy,
+        ),
+    )
+    result = mc.run("p")
+    assert thinker.calls[0]["n"] == 1
+    assert thinker.calls[0]["temperature"] == 0.0
+    assert thinker.calls[1]["n"] == 2
+    assert thinker.calls[1]["temperature"] == 0.8
+    cands = result.trace.rounds[0].candidates
+    assert len(cands) == 3
+    assert cands[0].source == "greedy"
+    assert [c.source for c in cands[1:]] == ["sample", "sample"]
+
+
+def test_greedy_anchor_with_n_paths_1_is_greedy_only():
+    thinker = FakeThinker([[gen("greedy answer", finished=True)]])
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="best_of_n", n_paths=1, greedy_anchor=True, split_generations=False),
+    )
+    mc.run("p")
+    assert len(thinker.calls) == 1
+    assert thinker.calls[0]["n"] == 1
+    assert thinker.calls[0]["temperature"] == 0.0
+
+
+@pytest.mark.parametrize("strategy", ["noul", "choice"])
 def test_single_candidate_skips_judge(strategy):
     thinker = FakeThinker([[gen("only path", finished=True)]])
     judge = FakeJudge()

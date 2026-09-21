@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel
 
-from .judge import FINISHED_QUESTIONS, Judge
+from .answers import extract_answer
+from .judge import ANSWER_PRIOR_INSTRUCTIONS, FINISHED_QUESTIONS, Judge
 from .split import split_paths
 from .thinker import Thinker
 from .types import Candidate, Result, Round, Trace, Verdict
@@ -80,6 +82,11 @@ class Config(BaseModel):
     # below stop_confidence, open another level (branching from the best answer so
     # far) — up to this many levels in total
     max_rounds: int = 1
+    # weight of the judge's "answer prior": each candidate's noul score is raised by
+    # answer_prior * P(its bare final answer is correct), judged without the reasoning.
+    # None disables. Only applied when >1 candidate is judged (never to the cascade).
+    answer_prior: float | None = None
+    answer_extractor: Callable[[str], str | None] = extract_answer
 
 
 class MetaCog:
@@ -127,13 +134,41 @@ class MetaCog:
         if len(cands) == 1:
             return Verdict(probabilities=[1.0], choice=0, confidence=1.0)
         if self.config.strategy == "noul":
+            cfg = self.config
             v = self.judge.score(
                 problem,
                 [c.text for c in cands],
-                instructions=self.config.judge_instructions,
+                instructions=cfg.judge_instructions,
             )
             trace.judge_calls += len(cands)
-            return v
+            if cfg.answer_prior is None:
+                return v
+            # Answer prior: score each distinct bare final answer on its own and
+            # add answer_prior * P(answer correct) to the full-text score.
+            answers = [cfg.answer_extractor(c.text) for c in cands]
+            distinct = list(dict.fromkeys(a for a in answers if a is not None))
+            if not distinct:
+                return v
+            pv = self.judge.score(
+                problem,
+                [f"Final answer: {a}" for a in distinct],
+                instructions=ANSWER_PRIOR_INSTRUCTIONS,
+            )
+            trace.judge_calls += len(distinct)
+            prior = dict(zip(distinct, pv.raw or pv.probabilities, strict=True))
+            base = v.raw or v.probabilities
+            new_raw = [
+                base[i] + cfg.answer_prior * (prior[answers[i]] if answers[i] is not None else 0.5)
+                for i in range(len(cands))
+            ]
+            total = sum(new_raw)
+            probs = [p / total for p in new_raw] if total else [1.0 / len(new_raw)] * len(new_raw)
+            return Verdict(
+                probabilities=probs,
+                choice=max(range(len(new_raw)), key=lambda i: new_raw[i]),
+                confidence=max(new_raw),
+                raw=new_raw,
+            )
         judged = cands[:MAX_JUDGE_CANDIDATES]
         v = self.judge.choose(
             problem,

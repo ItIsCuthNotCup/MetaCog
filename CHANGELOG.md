@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `answer_prior`: Jev also judges each distinct bare final answer; that prior is
+  added to the text score (offline on saved disagreeing pools: 83→93 of 119 correct
+  picks, +14/−4). Judge default `max_chars_per_path` raised 6000→24000.
 - `mode="adaptive"` (experimental): the greedy answer is the root; the judge's
   uncertainty `u = 1 − score` scales branching between `n_min`/`n_max`, and an
   optional sketch level (`sketch_tokens`) is judged and pruned (`expand_max`,

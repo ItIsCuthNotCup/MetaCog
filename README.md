@@ -144,6 +144,11 @@ thinker writes inside a single sample, and `commit_confidence=0.9` to stop branc
 the judge is sure (a cost knob — judge margins were *not* a usable abstention signal in the
 measured pool).
 
+Experimental: `answer_prior=w` (e.g. `0.5`) asks the judge to also score each distinct
+bare final answer (`Final answer: X`, no reasoning) and adds `w ×` that noul to each
+candidate's full-text score before picking — offline on saved disagreeing pools it
+lifted correct picks from 83 to 93 of 119 (+14/−4).
+
 CLI:
 
 ```bash

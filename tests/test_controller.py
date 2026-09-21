@@ -279,6 +279,50 @@ def test_adaptive_unfinished_greedy_never_stops_early():
     assert thinker.calls[1]["n"] == 6  # u = 1 - 0.0 -> n_max
 
 
+def test_answer_prior_reranks():
+    from metacog.judge import ANSWER_PRIOR_INSTRUCTIONS
+
+    thinker = FakeThinker(
+        [
+            [
+                gen("long reasoning work Answer: 7", finished=True),
+                gen("other reasoning work Answer: 9", finished=True),
+            ]
+        ]
+    )
+    # second score() call is the prior over the two distinct bare answers
+    judge = FakeJudge(scores=[[0.6, 0.55], [0.1, 0.9]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=2,
+            split_generations=False,
+            answer_prior=0.5,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "other reasoning work Answer: 9"
+    prior_call = judge.calls[1]
+    assert prior_call["candidates"] == ["Final answer: 7", "Final answer: 9"]
+    assert prior_call["instructions"] == ANSWER_PRIOR_INSTRUCTIONS
+    assert result.trace.judge_calls == 4  # 2 candidates + 2 distinct answers
+
+
+def test_answer_prior_skipped_for_single_candidate():
+    thinker = FakeThinker([[gen("only path Answer: 3", finished=True)]])
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="best_of_n", n_paths=1, split_generations=False, answer_prior=0.5),
+    )
+    result = mc.run("p")
+    assert result.answer == "only path Answer: 3"
+    assert result.trace.judge_calls == 0
+
+
 def test_cascade_requires_greedy_anchor():
     with pytest.raises(ValueError, match="greedy_anchor"):
         MetaCog(FakeThinker([]), FakeJudge(), Config(cascade_confidence=0.9))

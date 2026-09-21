@@ -4,6 +4,7 @@ Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, THINKER_STREAM
 MODE (best_of_n default | stepwise | adaptive), STEP_TOKENS (384), MAX_STEPS (2),
 CASCADE (0.95 default, 0 disables; also stop_confidence for adaptive), N_MIN (2),
 N_MAX (6), SKETCH_TOKENS (0 = full-solution branches), EXPAND_MAX (3),
+ANSWER_PRIOR (unset = off; e.g. 0.5 adds Jev's bare-answer noul to each pick),
 PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
@@ -169,6 +170,7 @@ def main() -> None:
     judge = SystemOneJudge.jev()
     mode = os.environ.get("MODE", "best_of_n")
     n_paths = int(os.environ.get("N_PATHS", "3"))
+    answer_prior = float(os.environ["ANSWER_PRIOR"]) if os.environ.get("ANSWER_PRIOR") else None
     if mode == "stepwise":
         cfg = Config(
             mode="stepwise",
@@ -179,6 +181,7 @@ def main() -> None:
             max_tokens=max_tokens,
             temperature=0.9,
             finish_paths=True,  # final level expands survivors into full thoughts
+            answer_prior=answer_prior,
         )
     elif mode == "adaptive":
         cfg = Config(
@@ -191,6 +194,7 @@ def main() -> None:
             sketch_tokens=int(os.environ.get("SKETCH_TOKENS", "0")),
             expand_max=int(os.environ.get("EXPAND_MAX", "3")),
             max_rounds=int(os.environ.get("MAX_ROUNDS", "1")),
+            answer_prior=answer_prior,
         )
     else:
         cfg = Config(
@@ -204,6 +208,7 @@ def main() -> None:
                 if os.environ.get("CASCADE", "0.95") not in ("", "0")
                 else None
             ),
+            answer_prior=answer_prior,
         )
     mc = MetaCog(thinker, judge, cfg)
     out = []

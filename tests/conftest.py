@@ -51,7 +51,14 @@ class FakeJudge:
         return Verdict(probabilities=probs, choice=idx, confidence=self.confidence)
 
     def score(self, problem, candidates, *, instructions=None):
-        self.calls.append({"kind": "score", "problem": problem, "candidates": list(candidates)})
+        self.calls.append(
+            {
+                "kind": "score",
+                "problem": problem,
+                "candidates": list(candidates),
+                "instructions": instructions,
+            }
+        )
         if self.scores is not None:
             raw = self.scores.pop(0)
         else:

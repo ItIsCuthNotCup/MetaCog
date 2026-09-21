@@ -29,7 +29,9 @@ class Candidate(BaseModel):
 
     text: str
     finished: bool
-    source: Literal["sample", "split", "greedy"]
+    # sketch: short outline of an approach (adaptive mode, never a final answer);
+    # expand: full solution written by following a kept sketch.
+    source: Literal["sample", "split", "greedy", "sketch", "expand"]
     parent: int | None = None
 
 

@@ -128,6 +128,14 @@ Two modes:
 |---|---|---|
 | `best_of_n` | sample `n_paths` full answers, judge picks one | cheapest; works with any chat endpoint |
 | `stepwise` | sample `n_paths` continuations of `step_tokens`, judge picks, extend, repeat | tighter steering; needs prefix continuation (vLLM `continue_final_message` or `/v1/completions`) |
+| `adaptive` | greedy answer is the root; judge uncertainty `u = 1 − score` sets the branching factor `n_min..n_max`; an optional sketch level is judged and pruned, and only kept sketches are expanded into full solutions | experimental |
+
+`adaptive` is opt-in and experimental — pending paired numbers. A greedy path scored at
+least `stop_confidence` (default 0.95) is returned immediately; otherwise `n_br =
+round(n_min + u·(n_max − n_min))` branches open. With `sketch_tokens > 0` the branches
+are cheap outlines judged under `SKETCH_JUDGE_INSTRUCTIONS` and pruned to
+`round(1 + u·(expand_max − 1))` (dropping any more than `prune_margin` below the best);
+only full solutions — the greedy root or expanded sketches — are ever the answer.
 
 Judging strategy: `strategy="noul"` (default; one isolated "is this correct?" call per
 candidate — the measured winner) or `strategy="choice"` (one comparative call, cheaper).

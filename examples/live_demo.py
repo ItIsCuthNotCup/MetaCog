@@ -1,8 +1,10 @@
 """Live demo: wrap any OpenAI-compatible thinker in MetaCog with a Jev judge and dump full traces.
 
 Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, THINKER_STREAM, N_PATHS,
-MODE (best_of_n default | stepwise), STEP_TOKENS (384), MAX_STEPS (2), CASCADE (0.95 default,
-0 disables), PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
+MODE (best_of_n default | stepwise | adaptive), STEP_TOKENS (384), MAX_STEPS (2),
+CASCADE (0.95 default, 0 disables; also stop_confidence for adaptive), N_MIN (2),
+N_MAX (6), SKETCH_TOKENS (0 = full-solution branches), EXPAND_MAX (3),
+PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
 
@@ -178,6 +180,17 @@ def main() -> None:
             temperature=0.9,
             finish_paths=True,  # final level expands survivors into full thoughts
         )
+    elif mode == "adaptive":
+        cfg = Config(
+            mode="adaptive",
+            max_tokens=max_tokens,
+            temperature=0.9,
+            stop_confidence=float(os.environ.get("CASCADE", "0.95")),
+            n_min=int(os.environ.get("N_MIN", "2")),
+            n_max=int(os.environ.get("N_MAX", "6")),
+            sketch_tokens=int(os.environ.get("SKETCH_TOKENS", "0")),
+            expand_max=int(os.environ.get("EXPAND_MAX", "3")),
+        )
     else:
         cfg = Config(
             mode="best_of_n",
@@ -267,9 +280,14 @@ def main() -> None:
                     }
                 ],
                 "judge_calls": res.trace.judge_calls,
+                "thinker_calls": res.trace.thinker_calls,
                 "thinker_tokens": res.trace.thinker_tokens,
             },
         }
+        if mode == "adaptive":
+            row["metacog"]["levels"] = [
+                {"n": len(r.candidates), "kept": r.kept} for r in res.trace.rounds
+            ]
         if mode == "stepwise":
             row["metacog"]["rounds"] = len(res.trace.rounds)
             row["metacog"]["levels"] = [

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `mode="adaptive"` (experimental): the greedy answer is the root; the judge's
+  uncertainty `u = 1 − score` scales branching between `n_min`/`n_max`, and an
+  optional sketch level (`sketch_tokens`) is judged and pruned (`expand_max`,
+  `prune_margin`) so only kept sketches are expanded to full solutions. A greedy
+  path at `stop_confidence` returns immediately; sketches are never the answer.
+
 ## 0.2.0
 
 - `OpenAICompatThinker` accepts base URLs with or without a `/v1` suffix.

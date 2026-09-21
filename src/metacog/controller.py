@@ -13,6 +13,18 @@ from .types import Candidate, Result, Round, Trace, Verdict
 
 MAX_JUDGE_CANDIDATES = 26
 
+SKETCH_PROMPT = (
+    "{problem}\n\nDo NOT solve this yet. In at most 150 words, outline the approach you "
+    "would take: the key idea, the main steps, and any pitfall to avoid. No final answer."
+)
+EXPAND_PROMPT = (
+    "{problem}\n\nSolve it by following this approach (fix it if it is flawed):\n{sketch}"
+)
+SKETCH_JUDGE_INSTRUCTIONS = (
+    "The response is only an outline of an approach, not a full solution. Judge whether "
+    "following this approach would lead to the correct final answer."
+)
+
 
 def _est_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token). We do not ship a tokenizer, so the
@@ -21,7 +33,7 @@ def _est_tokens(text: str) -> int:
 
 
 class Config(BaseModel):
-    mode: Literal["best_of_n", "stepwise"] = "stepwise"
+    mode: Literal["best_of_n", "stepwise", "adaptive"] = "stepwise"
     # noul: one isolated "is this correct?" request per candidate (no cap);
     # choice: one-shot pick over all candidates (max 26).
     strategy: Literal["noul", "choice"] = "noul"
@@ -43,6 +55,22 @@ class Config(BaseModel):
     commit_confidence: float | None = None  # stepwise: >= this -> finish winner greedily
     judge_instructions: str | None = None
     verify_finished: bool = False  # assess() a finished winner, record on the Round
+    # -- adaptive (decision-tree heuristics; branching scales with the judge's
+    #    uncertainty about the greedy answer) ----------------------------------
+    # greedy noul >= stop_confidence -> leaf, return it after one generation
+    stop_confidence: float = 0.95
+    # branching factor at a node grows linearly with impurity u = 1 - greedy score:
+    # n_branches = round(n_min + u * (n_max - n_min))
+    n_min: int = 2
+    n_max: int = 6
+    # 0 -> branches are full sampled solutions (adaptive best-of-N). > 0 -> branches
+    # are short sketches of this many tokens; the judge prunes them and only the
+    # kept sketches are expanded into full solutions.
+    sketch_tokens: int = 0
+    # sketches kept for expansion: round(1 + u * (expand_max - 1)), and a sketch is
+    # dropped when its score is below best_sketch_score - prune_margin
+    expand_max: int = 3
+    prune_margin: float = 0.25
 
 
 class MetaCog:
@@ -56,13 +84,19 @@ class MetaCog:
     # -- internals -----------------------------------------------------------
 
     def _expand(
-        self, gens, prefix: str, *, source: Literal["sample", "greedy"] = "sample"
+        self,
+        gens,
+        prefix: str,
+        *,
+        source: Literal["sample", "greedy", "expand"] = "sample",
+        parent: int | None = None,
     ) -> list[Candidate]:
         """Turn raw generations (continuations of ``prefix``) into candidates."""
         cands: list[Candidate] = []
         for idx, g in enumerate(gens):
             full = prefix + g.text
-            cands.append(Candidate(text=full, finished=g.finished, source=source, parent=idx))
+            pid = idx if parent is None else parent
+            cands.append(Candidate(text=full, finished=g.finished, source=source, parent=pid))
             if self.config.split_generations:
                 pieces = split_paths(g.text)
                 for i, piece in enumerate(pieces):
@@ -74,7 +108,7 @@ class MetaCog:
                                 text=prefix + piece,
                                 finished=g.finished if i == len(pieces) - 1 else False,
                                 source="split",
-                                parent=idx,
+                                parent=pid,
                             )
                         )
         return cands
@@ -139,7 +173,96 @@ class MetaCog:
     def run(self, problem: str) -> Result:
         if self.config.mode == "best_of_n":
             return self._best_of_n(problem)
+        if self.config.mode == "adaptive":
+            return self._adaptive(problem)
         return self._stepwise(problem)
+
+    def _pick(self, problem: str, cands: list[Candidate], step: int, trace: Trace) -> Result:
+        """Judge full candidates, finished-first, record the round, return the best."""
+        cfg = self.config
+        verdict = self._verdict(problem, cands, trace)
+        ranked = sorted(
+            range(len(cands)),
+            key=lambda i: (not cands[i].finished, -verdict.probabilities[i]),
+        )
+        kept = ranked[: cfg.keep_top_k]
+        rnd = Round(step=step, prefix="", candidates=cands, verdict=verdict, kept=kept)
+        trace.rounds.append(rnd)
+        best = cands[ranked[0]]
+        if best.finished:
+            self._verify(problem, best.text, rnd, trace)
+        return Result(answer=best.text, finished=best.finished, trace=trace)
+
+    def _adaptive(self, problem: str) -> Result:
+        """Decision-tree style search: the greedy answer is the root; the judge's
+        uncertainty about it (impurity u = 1 - score) decides whether to split at
+        all, how many branches to open, and how many to expand to full depth.
+        Only full solutions are ever committed to as answers."""
+        cfg, trace = self.config, Trace()
+        greedy = self._generate(
+            problem, "", n=1, max_tokens=cfg.max_tokens, temperature=0.0, trace=trace
+        )
+        root = self._expand(greedy, "", source="greedy")
+        v = self.judge.score(problem, [c.text for c in root], instructions=cfg.judge_instructions)
+        trace.judge_calls += len(root)
+        score_vals = v.raw or v.probabilities
+        finished = [i for i, c in enumerate(root) if c.finished]
+        g_score = max((score_vals[i] for i in finished), default=0.0)
+        if finished and g_score >= cfg.stop_confidence:
+            choice = max(finished, key=lambda i: score_vals[i])
+            verdict = Verdict(
+                probabilities=v.probabilities, choice=choice, confidence=g_score, raw=v.raw
+            )
+            rnd = Round(step=0, prefix="", candidates=root, verdict=verdict, kept=[choice])
+            trace.rounds.append(rnd)
+            self._verify(problem, root[choice].text, rnd, trace)
+            return Result(answer=root[choice].text, finished=True, trace=trace)
+        u = 1.0 - g_score
+        n_br = max(1, round(cfg.n_min + u * (cfg.n_max - cfg.n_min)))
+        if cfg.sketch_tokens <= 0:
+            gens = self._generate(
+                problem,
+                "",
+                n=n_br,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                trace=trace,
+            )
+            return self._pick(problem, root + self._expand(gens, ""), 0, trace)
+        # Sketch level: cheap outlines, judged and pruned before any is expanded.
+        sk_gens = self._generate(
+            SKETCH_PROMPT.format(problem=problem),
+            "",
+            n=n_br,
+            max_tokens=cfg.sketch_tokens,
+            temperature=cfg.temperature,
+            trace=trace,
+        )
+        sketches = [
+            Candidate(text=g.text, finished=False, source="sketch", parent=i)
+            for i, g in enumerate(sk_gens)
+        ]
+        sv = self.judge.score(
+            problem, [s.text for s in sketches], instructions=SKETCH_JUDGE_INSTRUCTIONS
+        )
+        trace.judge_calls += len(sketches)
+        s_vals = sv.raw or sv.probabilities
+        order = sorted(range(len(sketches)), key=lambda i: -s_vals[i])
+        k = max(1, round(1 + u * (cfg.expand_max - 1)))
+        kept = [i for i in order[:k] if s_vals[i] >= s_vals[order[0]] - cfg.prune_margin]
+        trace.rounds.append(Round(step=0, prefix="", candidates=sketches, verdict=sv, kept=kept))
+        cands = list(root)
+        for i in kept:
+            gens = self._generate(
+                EXPAND_PROMPT.format(problem=problem, sketch=sketches[i].text),
+                "",
+                n=1,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                trace=trace,
+            )
+            cands.extend(self._expand(gens, "", source="expand", parent=i))
+        return self._pick(problem, cands, 1, trace)
 
     def _best_of_n(self, problem: str) -> Result:
         cfg, trace = self.config, Trace()

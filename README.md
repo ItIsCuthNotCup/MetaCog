@@ -43,7 +43,26 @@ limits in [docs/METHOD.md](docs/METHOD.md).
 judge's pick with full traces. `examples/render_demo.py 'runs/*.json' report.html
 "title"` renders a self-contained HTML report.
 
-<!-- LIVE_TABLE -->
+One pass (Sep 2026) over 12 harder counting problems, 3 candidates each, Jev judging, no
+cherry-picking of models or problems. Sanity check that the loop works on live models, not a
+benchmark — most problems are too easy to separate the arms.
+
+| thinker | baseline (1 greedy) | MetaCog (Jev pick of 3) | ceiling |
+|---|---|---|---|
+| deepseek/deepseek-v4-flash | 10/12 | **11/12** | 11/12 |
+| xiaomi/mimo-v2.5 | 10/12 | **11/12** | 11/12 |
+| z-ai/glm-5.3-flash | 10/12 | **11/12** | 12/12 |
+| MiniMaxAI/MiniMax-M2.5 | 10/12 | 10/12 | 10/12 |
+| meituan/LongCat-2.0 | 10/12 | 10/12 | 10/12 |
+| stepfun/Step-3.5-Flash | 10/12 | 10/12 | 10/12 |
+| moonshotai/Kimi-K2.5 | 11/12 | 11/12 | 11/12 |
+| Qwen/Qwen3.8-Flash | 11/11 | 11/11 | 11/11 |
+| zai-org/GLM-5.1 (provider dropped out) | 6/6 | 6/6 | 6/6 |
+| Qwen/Qwen3.6-Plus (provider dropped out) | 3/3 | 3/3 | 3/3 |
+| MiniCPM5-2B, local on a DGX Spark (12 easier problems) | 11/12 | **12/12** | 12/12 |
+
+MetaCog never did worse than the baseline; every rescue was a problem where the baseline
+was wrong and Jev picked a correct candidate out of a disagreeing set.
 
 ## Install
 

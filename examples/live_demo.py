@@ -1,6 +1,6 @@
 """Live demo: wrap any OpenAI-compatible thinker in MetaCog with a Jev judge and dump full traces.
 
-Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
+Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, N_PATHS, PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
 
@@ -168,7 +168,7 @@ def main() -> None:
         judge,
         Config(
             mode="best_of_n",
-            n_paths=3,
+            n_paths=int(os.environ.get("N_PATHS", "3")),
             max_tokens=max_tokens,
             temperature=0.9,
             greedy_anchor=True,  # candidate 0 IS the baseline: the judge can only gain

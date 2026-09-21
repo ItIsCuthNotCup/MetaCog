@@ -260,6 +260,108 @@ def test_transport_error_exhaustion_raises(monkeypatch):
     assert calls["n"] == 3  # initial + max_retries(2)
 
 
+def test_base_url_trailing_v1_normalized():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}]}
+        )
+
+    t = _thinker(handler, base_url="https://x/provider/v1", model="m")
+    assert t.base_url == "https://x/provider"
+    t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert seen["url"] == "https://x/provider/v1/chat/completions"
+
+    assert OpenAICompatThinker("http://h:8000/", model="m").base_url == "http://h:8000"
+
+
+def test_reasoning_content_folded_into_text():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "Answer: 5", "reasoning_content": "2+3"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat")
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert gens[0].text == "<think>\n2+3\n</think>\nAnswer: 5"
+
+
+def test_reasoning_key_also_folded():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "Answer: 5", "reasoning": "2+3"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat")
+    assert t.generate("p", "", n=1, max_tokens=8, temperature=0.0)[0].text == (
+        "<think>\n2+3\n</think>\nAnswer: 5"
+    )
+
+
+def test_include_reasoning_false_drops_think_block():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "Answer: 5", "reasoning_content": "2+3"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat", include_reasoning=False)
+    assert t.generate("p", "", n=1, max_tokens=8, temperature=0.0)[0].text == "Answer: 5"
+
+
+@pytest.mark.parametrize("status", [524, 429])
+def test_retryable_status_retried_then_succeeds(monkeypatch, status):
+    monkeypatch.setattr("metacog.thinker.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(status, text="upstream overloaded")
+        return httpx.Response(200, json={"choices": [{"text": "x", "finish_reason": "stop"}]})
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert len(gens) == 1
+    assert calls["n"] == 2
+
+
+def test_retryable_status_with_zero_retries_raises(monkeypatch):
+    monkeypatch.setattr("metacog.thinker.time.sleep", lambda s: None)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(524, text="timeout")
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions", max_retries=0)
+    with pytest.raises(ThinkerError, match="HTTP 524"):
+        t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+
+
 def test_bearer_header_sent_when_key():
     seen = {}
 

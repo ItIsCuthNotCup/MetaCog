@@ -35,6 +35,9 @@ class Thinker(Protocol):
     ) -> list[Generation]: ...
 
 
+RETRY_STATUSES = {408, 409, 429, 500, 502, 503, 504, 522, 524}
+
+
 class OpenAICompatThinker:
     """Thinker backed by an OpenAI-compatible server (vLLM, llama.cpp, Ollama, OpenAI).
 
@@ -53,9 +56,17 @@ class OpenAICompatThinker:
       Servers without prefill support should use ``prefix_mode="prompt"`` or stick to
       ``mode="best_of_n"`` (which never sends a prefix).
 
+    ``base_url`` may or may not end in ``/v1`` (``https://api.openai.com/v1`` and
+    ``http://localhost:8000`` both work). Hosted gateways that need a key take
+    ``api_key`` (sent as a bearer token).
+
     Quirks tolerated automatically: servers that silently ignore ``n`` (detected once,
     then requests go sequential), ``finish_reason="stop"`` on token-truncated output
-    (repaired from ``usage``), and HTTP 200 bodies carrying an ``{"error": ...}``.
+    (repaired from ``usage``), HTTP 200 bodies carrying an ``{"error": ...}``, and
+    transient 429/5xx responses (retried with backoff). Reasoning models' side-channel
+    chain of thought (``reasoning_content`` / ``reasoning``) is folded into the
+    candidate text inside ``<think>`` tags so the judge can read it
+    (``include_reasoning=False`` to disable).
     """
 
     def __init__(
@@ -70,9 +81,10 @@ class OpenAICompatThinker:
         prefix_mode: Literal["assistant", "prompt"] = "assistant",
         supports_n: bool = True,
         max_retries: int = 2,
+        include_reasoning: bool = True,
         client: httpx.Client | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.rstrip("/").removesuffix("/v1")
         self.model = model
         self.api_key = api_key
         self.api = api
@@ -81,6 +93,7 @@ class OpenAICompatThinker:
         self.prefix_mode = prefix_mode
         self.supports_n = supports_n
         self.max_retries = max_retries
+        self.include_reasoning = include_reasoning
         self._client = client or httpx.Client(timeout=timeout)
 
     def _headers(self) -> dict[str, str]:
@@ -98,6 +111,9 @@ class OpenAICompatThinker:
                 resp = self._client.post(
                     f"{self.base_url}{path}", json=body, headers=self._headers()
                 )
+                if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:
+                    time.sleep(2 * (attempt + 1))
+                    continue
                 break
             except httpx.TransportError as e:
                 if attempt >= self.max_retries:
@@ -130,7 +146,14 @@ class OpenAICompatThinker:
         gens = []
         for choice in choices:
             if chat:
-                text = (choice.get("message") or {}).get("content") or ""
+                msg = choice.get("message") or {}
+                text = msg.get("content") or ""
+                # Reasoning models (DeepSeek, Qwen, GLM, ...) return their chain of
+                # thought in a side field; fold it in so the judge sees the reasoning
+                # and a token-truncated response is not an empty string.
+                reasoning = msg.get("reasoning_content") or msg.get("reasoning")
+                if reasoning and self.include_reasoning:
+                    text = f"<think>\n{reasoning}\n</think>\n{text}"
             else:
                 text = choice.get("text") or ""
             finished = choice.get("finish_reason") == "stop"

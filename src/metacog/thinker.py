@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 import httpx
 
@@ -22,6 +22,7 @@ PROMPT_PREFIX_TEMPLATE = (
 )
 
 
+@runtime_checkable
 class Thinker(Protocol):
     """The base model that produces reasoning paths."""
 

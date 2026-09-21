@@ -6,6 +6,8 @@ CASCADE (0.95 default, 0 disables; also stop_confidence for adaptive), N_MIN (2)
 N_MAX (6), SKETCH_TOKENS (0 = full-solution branches), EXPAND_MAX (3),
 ANSWER_PRIOR (unset = off; e.g. 0.5 adds Jev's bare-answer noul to each pick),
 TRIAGE (unset = off; e.g. 0.5, adaptive only — hard problems branch concurrently),
+DIVERSITY=1 (sampled branches each get a different approach hint), ESCALATE_MODEL
+(adaptive only: a second thinker model for one greedy rescue when unconfident),
 PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
@@ -17,6 +19,7 @@ import sys
 import time
 
 from metacog import Config, MetaCog, OpenAICompatThinker, SystemOneJudge
+from metacog.controller import DIVERSITY_HINTS
 from metacog.thinker import ThinkerError
 
 SYSTEM = (
@@ -172,6 +175,18 @@ def main() -> None:
     mode = os.environ.get("MODE", "best_of_n")
     n_paths = int(os.environ.get("N_PATHS", "3"))
     answer_prior = float(os.environ["ANSWER_PRIOR"]) if os.environ.get("ANSWER_PRIOR") else None
+    diversity_hints = DIVERSITY_HINTS if os.environ.get("DIVERSITY") == "1" else None
+    escalate_thinker = (
+        OpenAICompatThinker(
+            url,
+            model=os.environ["ESCALATE_MODEL"],
+            api_key=os.environ.get("THINKER_KEY"),
+            system_prompt=SYSTEM,
+            stream=os.environ.get("THINKER_STREAM", "1") != "0",
+        )
+        if os.environ.get("ESCALATE_MODEL")
+        else None
+    )
     if mode == "stepwise":
         cfg = Config(
             mode="stepwise",
@@ -183,6 +198,7 @@ def main() -> None:
             temperature=0.9,
             finish_paths=True,  # final level expands survivors into full thoughts
             answer_prior=answer_prior,
+            diversity_hints=diversity_hints,
         )
     elif mode == "adaptive":
         cfg = Config(
@@ -197,6 +213,8 @@ def main() -> None:
             max_rounds=int(os.environ.get("MAX_ROUNDS", "1")),
             triage=(float(os.environ["TRIAGE"]) if os.environ.get("TRIAGE") else None),
             answer_prior=answer_prior,
+            diversity_hints=diversity_hints,
+            escalate_thinker=escalate_thinker,
         )
     else:
         cfg = Config(
@@ -211,6 +229,7 @@ def main() -> None:
                 else None
             ),
             answer_prior=answer_prior,
+            diversity_hints=diversity_hints,
         )
     mc = MetaCog(thinker, judge, cfg)
     out = []
@@ -290,6 +309,7 @@ def main() -> None:
                 "judge_calls": res.trace.judge_calls,
                 "thinker_calls": res.trace.thinker_calls,
                 "thinker_tokens": res.trace.thinker_tokens,
+                "escalated": res.trace.escalated,
             },
         }
         if mode == "adaptive":

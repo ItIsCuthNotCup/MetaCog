@@ -1,6 +1,6 @@
 """Live demo: wrap any OpenAI-compatible thinker in MetaCog with a Jev judge and dump full traces.
 
-Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, PROBLEM_SET=hard, OUT.
+Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
 
@@ -11,10 +11,11 @@ import sys
 import time
 
 from metacog import Config, MetaCog, OpenAICompatThinker, SystemOneJudge
+from metacog.thinker import ThinkerError
 
 SYSTEM = (
     "Solve the problem. Think step by step but briefly, then finish with a final line "
-    "of the form 'Answer: <number>'."
+    "of the form 'Answer: <number>' (or 'Answer: <letter>' for multiple choice)."
 )
 
 PROBLEMS = [
@@ -79,18 +80,74 @@ HARD = [
     ("What is the sum of all positive divisors of 360?", "1170"),
     ("How many three-digit numbers n are palindromes such that n^2 is also a palindrome?", "5"),
 ]
-if os.environ.get("PROBLEM_SET") == "hard":
-    PROBLEMS = HARD
+# Ground truths brute-forced by examples/verify_harder.py.
+HARDER = [
+    ("How many positive integers n with 1 <= n <= 1000 make n^2 + n + 1 prime?", "189"),
+    (
+        "How many ordered pairs of integers (a, b) with 1 <= a, b <= 100 have gcd(a, b) = 1 and a + b divisible by 7?",
+        "756",
+    ),
+    (
+        "How many six-digit positive integers have strictly increasing digits and a digit sum divisible by 3?",
+        "30",
+    ),
+    (
+        "How many integers n with 1 <= n <= 2024 can be written as x^2 - y^2 for non-negative integers x, y?",
+        "1518",
+    ),
+    (
+        "How many permutations p of {1, ..., 8} have no fixed point (p(i) != i for all i) and satisfy p(1) = 2?",
+        "2119",
+    ),
+    ("How many binary strings of length 12 contain no three consecutive equal bits?", "466"),
+    (
+        "How many lattice paths from (0, 0) to (8, 8) using unit steps right or up never pass through (4, 4)?",
+        "7970",
+    ),
+    ("How many ordered triples of positive integers (a, b, c) satisfy a * b * c = 720?", "270"),
+    (
+        "For how many integers n with 1 <= n <= 500 does n! have exactly 3 more trailing zeros than (n-1)!?",
+        "4",
+    ),
+    (
+        "How many 4x4 matrices with entries in {0, 1} have every row sum and every column sum even?",
+        "512",
+    ),
+    ("What is the sum of the decimal digits of 3^100?", "153"),
+    (
+        "How many positive integers less than or equal to 10000 have a digit sum of exactly 20?",
+        "633",
+    ),
+    (
+        "How many subsets of {1, 2, ..., 12} (including the empty set) have an element sum divisible by 12?",
+        "344",
+    ),
+    ("How many primes p < 1000 are such that p + 2 and p + 6 are also prime?", "15"),
+    ("What are the last three digits of 3^2024? Give the answer as a number.", "481"),
+]
+PROBLEM_SETS = {"hard": HARD, "harder": HARDER}
+if os.environ.get("PROBLEM_SET") in PROBLEM_SETS:
+    PROBLEMS = PROBLEM_SETS[os.environ["PROBLEM_SET"]]
+if os.environ.get("PROBLEMS_FILE"):  # JSONL rows: {"problem": ..., "answer": ...}
+    with open(os.environ["PROBLEMS_FILE"]) as fh:
+        PROBLEMS = [(r["problem"], str(r["answer"])) for r in map(json.loads, fh) if r]
 
 
-def final_answer(text: str) -> str | None:
-    m = re.findall(r"Answer:\s*\$?\s*(-?\d+(?:\.\d+)?)", text)
+def final_answer(text: str, truth: str = "0") -> str | None:
+    if re.fullmatch(r"[A-J]", truth):  # multiple choice
+        m = re.findall(r"(?:Answer:\s*\(?|\\boxed\{)\s*([A-J])\b", text)
+    else:
+        m = re.findall(r"Answer:\s*\$?\s*(-?\d+(?:\.\d+)?)", text)
     return m[-1] if m else None
 
 
 def correct(text: str, truth: str) -> bool:
-    a = final_answer(text)
-    return a is not None and abs(float(a) - float(truth)) < 1e-6
+    a = final_answer(text, truth)
+    if a is None:
+        return False
+    if re.fullmatch(r"[A-J]", truth):
+        return a == truth
+    return abs(float(a) - float(truth)) < 1e-6
 
 
 def main() -> None:
@@ -99,18 +156,31 @@ def main() -> None:
     max_tokens = int(os.environ.get("THINKER_MAX_TOKENS", "700"))
     out_path = os.environ.get("OUT", "live_demo.json")
     thinker = OpenAICompatThinker(
-        url, model=model, api_key=os.environ.get("THINKER_KEY"), system_prompt=SYSTEM
+        url,
+        model=model,
+        api_key=os.environ.get("THINKER_KEY"),
+        system_prompt=SYSTEM,
+        stream=os.environ.get("THINKER_STREAM", "1") != "0",
     )
     judge = SystemOneJudge.jev()
     mc = MetaCog(
         thinker, judge, Config(mode="best_of_n", n_paths=3, max_tokens=max_tokens, temperature=0.9)
     )
     out = []
+    if os.path.exists(out_path):  # resume a run interrupted by provider errors
+        out = json.load(open(out_path))["rows"]
+    done = {r["problem"] for r in out}
     for i, (problem, truth) in enumerate(PROBLEMS):
+        if problem in done:
+            continue
         t0 = time.time()
-        base = thinker.generate(problem, "", n=1, max_tokens=max_tokens, temperature=0.0)[0]
-        t1 = time.time()
-        res = mc.run(problem)
+        try:
+            base = thinker.generate(problem, "", n=1, max_tokens=max_tokens, temperature=0.0)[0]
+            t1 = time.time()
+            res = mc.run(problem)
+        except ThinkerError as e:
+            print(f"[{i + 1}/{len(PROBLEMS)}] skipped: {str(e)[:200]}", flush=True)
+            continue
         t2 = time.time()
         rnd = res.trace.rounds[0] if res.trace.rounds else None
         row = {

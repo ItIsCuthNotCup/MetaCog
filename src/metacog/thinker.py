@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Literal, Protocol
 
@@ -67,7 +68,12 @@ class OpenAICompatThinker:
     chain of thought (``reasoning_content`` / ``reasoning``) is folded into the
     candidate text inside ``<think>`` tags so the judge can read it
     (``include_reasoning=False`` to disable).
-    """
+
+    ``stream=True`` switches generation requests to SSE streaming
+    (``stream_options.include_usage``), which keeps the connection alive through
+    proxies that kill long-idle requests (e.g. Cloudflare's ~100s/524 timeout).
+    Chunks are accumulated back into the non-streamed response shape, so callers
+    see no difference."""
 
     def __init__(
         self,
@@ -82,6 +88,7 @@ class OpenAICompatThinker:
         supports_n: bool = True,
         max_retries: int = 2,
         include_reasoning: bool = True,
+        stream: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/").removesuffix("/v1")
@@ -94,6 +101,7 @@ class OpenAICompatThinker:
         self.supports_n = supports_n
         self.max_retries = max_retries
         self.include_reasoning = include_reasoning
+        self.stream = stream
         self._client = client or httpx.Client(timeout=timeout)
 
     def _headers(self) -> dict[str, str]:
@@ -102,15 +110,75 @@ class OpenAICompatThinker:
             h["Authorization"] = f"Bearer {self.api_key}"
         return h
 
+    def _read_stream(self, resp: httpx.Response, *, chat: bool) -> dict:
+        """Accumulate SSE chunks back into the non-streamed response shape."""
+        parts: dict[int, dict] = {}
+        usage = None
+        for line in resp.iter_lines():
+            if not line or line.startswith(":") or not line.startswith("data:"):
+                continue  # blanks and SSE comments/keepalives
+            payload = line[len("data:") :].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(chunk, dict) and "error" in chunk and "choices" not in chunk:
+                raise ThinkerError(f"stream chunk error: {chunk['error']}")
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            for ch in chunk.get("choices") or []:
+                acc = parts.setdefault(
+                    ch.get("index", 0),
+                    {"content": "", "reasoning": "", "text": "", "finish": None},
+                )
+                delta = ch.get("delta") or {}
+                acc["content"] += delta.get("content") or ""
+                acc["reasoning"] += delta.get("reasoning_content") or delta.get("reasoning") or ""
+                acc["text"] += ch.get("text") or ""
+                if ch.get("finish_reason"):
+                    acc["finish"] = ch["finish_reason"]
+        choices = []
+        for idx in sorted(parts):
+            acc = parts[idx]
+            if chat:
+                msg: dict = {"content": acc["content"]}
+                if acc["reasoning"]:
+                    msg["reasoning_content"] = acc["reasoning"]
+                choices.append({"index": idx, "message": msg, "finish_reason": acc["finish"]})
+            else:
+                choices.append({"index": idx, "text": acc["text"], "finish_reason": acc["finish"]})
+        return {"choices": choices, "usage": usage}
+
     def _post(self, path: str, body: dict) -> dict:
         resp = None
+        use_stream = self.stream and path.endswith("/completions")
+        if use_stream:
+            body = {
+                **body,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
         # Retry transient transport failures (disconnects, read timeouts, refused
         # connections) with a short backoff: 1s, 2s, ... up to max_retries retries.
         for attempt in range(self.max_retries + 1):
             try:
-                resp = self._client.post(
-                    f"{self.base_url}{path}", json=body, headers=self._headers()
-                )
+                if use_stream:
+                    with self._client.stream(
+                        "POST",
+                        f"{self.base_url}{path}",
+                        json=body,
+                        headers=self._headers(),
+                    ) as resp:
+                        if resp.status_code >= 400:
+                            resp.read()  # make .text available after the block
+                        else:
+                            return self._read_stream(resp, chat=path.endswith("/chat/completions"))
+                else:
+                    resp = self._client.post(
+                        f"{self.base_url}{path}", json=body, headers=self._headers()
+                    )
                 if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:
                     time.sleep(2 * (attempt + 1))
                     continue

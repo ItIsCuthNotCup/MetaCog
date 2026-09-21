@@ -362,6 +362,93 @@ def test_retryable_status_with_zero_retries_raises(monkeypatch):
         t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
 
 
+def _sse(events) -> bytes:
+    body = "".join(f"data: {json.dumps(e)}\n\n" for e in events)
+    return (body + "data: [DONE]\n\n").encode()
+
+
+def test_chat_streaming_folds_reasoning_and_usage():
+    seen = {}
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"reasoning_content": "2+"}}]},
+        {"choices": [{"index": 1, "delta": {"reasoning_content": "six"}}]},
+        {"choices": [{"index": 0, "delta": {"reasoning_content": "3", "content": "Answer: 5"}}]},
+        {"choices": [{"index": 1, "delta": {"content": "Answer: 6"}}]},
+        {
+            "choices": [
+                {"index": 0, "delta": {}, "finish_reason": "stop"},
+                {"index": 1, "delta": {}, "finish_reason": "stop"},
+            ]
+        },
+        {"choices": [], "usage": {"completion_tokens": 10}},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, content=_sse(chunks))
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat", stream=True)
+    gens = t.generate("p", "", n=2, max_tokens=64, temperature=0.7)
+    assert seen["body"]["stream"] is True
+    assert seen["body"]["stream_options"] == {"include_usage": True}
+    assert [g.text for g in gens] == [
+        "<think>\n2+3\n</think>\nAnswer: 5",
+        "<think>\nsix\n</think>\nAnswer: 6",
+    ]
+    assert all(g.finished for g in gens)
+
+
+def test_streaming_524_then_retry_succeeds(monkeypatch):
+    monkeypatch.setattr("metacog.thinker.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(524, text="origin timeout")
+        return httpx.Response(
+            200,
+            content=_sse(
+                [
+                    {"choices": [{"index": 0, "delta": {"content": "hi"}}]},
+                    {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                ]
+            ),
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat", stream=True)
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert gens[0].text == "hi" and gens[0].finished
+    assert calls["n"] == 2
+
+
+def test_completions_streaming_text_deltas():
+    chunks = [
+        {"choices": [{"index": 0, "text": "the ans"}]},
+        {"choices": [{"index": 0, "text": "wer is 5", "finish_reason": "stop"}]},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_sse(chunks))
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions", stream=True)
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert gens[0].text == "the answer is 5"
+    assert gens[0].finished
+
+
+def test_stream_off_by_default_sends_no_stream_key():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"text": "x", "finish_reason": "stop"}]})
+
+    t = _thinker(handler, base_url="http://x", model="m", api="completions")
+    t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert "stream" not in seen["body"]
+
+
 def test_bearer_header_sent_when_key():
     seen = {}
 

@@ -6,6 +6,9 @@
 - Reasoning-model side channels (`reasoning_content` / `reasoning`) are folded into
   candidate text inside `<think>` tags (`include_reasoning=False` to disable).
 - Transient 408/429/5xx/522/524 responses retried with backoff (`max_retries`).
+- Optional SSE streaming (`stream=True`) for generation requests — survives
+  proxies that kill long-idle responses; chunks are folded back into the
+  standard response shape.
 - `best_of_n` never commits to an unfinished candidate — finished paths outrank
   higher-scored truncated ones.
 - Live multi-model demo + self-contained HTML renderer in `examples/`

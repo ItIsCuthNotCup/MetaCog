@@ -279,6 +279,69 @@ def test_adaptive_unfinished_greedy_never_stops_early():
     assert thinker.calls[1]["n"] == 6  # u = 1 - 0.0 -> n_max
 
 
+def test_triage_easy_keeps_cascade():
+    thinker = FakeThinker([[gen("greedy CORRECT answer", finished=True)]])
+    judge = FakeJudge(scores=[[0.9], [0.97]])  # triage says easy; greedy clears stop
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="adaptive", triage=0.5, stop_confidence=0.95, split_generations=False),
+    )
+    result = mc.run("p")
+    assert result.answer == "greedy CORRECT answer"
+    assert len(thinker.calls) == 1
+    assert thinker.calls[0]["temperature"] == 0.0
+    assert result.trace.judge_calls == 2
+    assert result.trace.triage == 0.9
+
+
+def test_triage_hard_branches_concurrently():
+    branches = [
+        gen(f"branch {i} CORRECT" if i == 0 else f"branch {i}", finished=True) for i in range(5)
+    ]
+    thinker = FakeThinker(
+        [
+            # greedy root and level-0 branches race; order of calls is not fixed
+            [gen("greedy answer", finished=True)],
+            branches,
+        ]
+    )
+    # triage 0.2 (< 0.5) -> hard start; u = 0.8 -> n_br = round(2 + 0.8*4) = 5;
+    # greedy scored 0.6 (below stop), then the pool pick favours branch 0.
+    judge = FakeJudge(scores=[[0.2], [0.6], [0.1, 0.9, 0.1, 0.1, 0.1, 0.1]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="adaptive",
+            triage=0.5,
+            stop_confidence=0.95,
+            n_min=2,
+            n_max=6,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "branch 0 CORRECT"
+    ns = sorted((c["n"], c["temperature"]) for c in thinker.calls)
+    assert ns == [(1, 0.0), (5, 0.8)]
+    assert result.trace.triage == 0.2
+    assert result.trace.judge_calls == 1 + 1 + 6  # triage + root + pool
+
+
+def test_triage_off_by_default():
+    thinker = FakeThinker([[gen("greedy CORRECT answer", finished=True)]])
+    judge = FakeJudge(scores=[[0.97]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="adaptive", stop_confidence=0.95, split_generations=False),
+    )
+    result = mc.run("p")
+    assert result.trace.triage is None
+    assert judge.calls[0]["candidates"] != [""]
+
+
 def test_answer_prior_reranks():
     from metacog.judge import ANSWER_PRIOR_INSTRUCTIONS
 

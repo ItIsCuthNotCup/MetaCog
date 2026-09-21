@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 from pydantic import BaseModel
 
 from .answers import extract_answer
-from .judge import ANSWER_PRIOR_INSTRUCTIONS, FINISHED_QUESTIONS, Judge
+from .judge import ANSWER_PRIOR_INSTRUCTIONS, FINISHED_QUESTIONS, TRIAGE_INSTRUCTIONS, Judge
 from .split import split_paths
 from .thinker import Thinker
 from .types import Candidate, Result, Round, Trace, Verdict
@@ -82,6 +83,10 @@ class Config(BaseModel):
     # below stop_confidence, open another level (branching from the best answer so
     # far) — up to this many levels in total
     max_rounds: int = 1
+    # adaptive: when set, the judge first scores the bare problem (path = ""); a
+    # score >= triage runs the normal flow, a lower score fires the greedy root
+    # and the level-0 branches concurrently, sizing branching from u = 1 - easy.
+    triage: float | None = None
     # weight of the judge's "answer prior": each candidate's noul score is raised by
     # answer_prior * P(its bare final answer is correct), judged without the reasoning.
     # None disables. Only applied when >1 candidate is judged (never to the cascade).
@@ -249,9 +254,58 @@ class MetaCog:
         all, how many branches to open, and how many to expand to full depth.
         Only full solutions are ever committed to as answers."""
         cfg, trace = self.config, Trace()
-        greedy = self._generate(
-            problem, "", n=1, max_tokens=cfg.max_tokens, temperature=0.0, trace=trace
-        )
+        easy: float | None = None
+        pre = None  # level-0 branches pre-generated concurrently with the greedy root
+        if cfg.triage is not None:
+            tv = self.judge.score(problem, [""], instructions=TRIAGE_INSTRUCTIONS)
+            trace.judge_calls += 1
+            easy = (tv.raw or tv.probabilities)[0]
+            trace.triage = easy
+        if easy is not None and easy < cfg.triage:
+            # Hard problem: don't wait for the greedy answer before branching.
+            u0 = 1.0 - easy
+            n_br0 = max(1, round(cfg.n_min + u0 * (cfg.n_max - cfg.n_min)))
+
+            def gen_greedy():
+                return self.thinker.generate(
+                    problem,
+                    "",
+                    n=1,
+                    max_tokens=cfg.max_tokens,
+                    temperature=0.0,
+                    stop=cfg.stop,
+                )
+
+            def gen_level0():
+                if cfg.sketch_tokens <= 0:
+                    return self.thinker.generate(
+                        problem,
+                        "",
+                        n=n_br0,
+                        max_tokens=cfg.max_tokens,
+                        temperature=cfg.temperature,
+                        stop=cfg.stop,
+                    )
+                return self.thinker.generate(
+                    SKETCH_PROMPT.format(problem=problem),
+                    "",
+                    n=n_br0,
+                    max_tokens=cfg.sketch_tokens,
+                    temperature=cfg.temperature,
+                    stop=cfg.stop,
+                )
+
+            with ThreadPoolExecutor(2) as ex:
+                f_greedy = ex.submit(gen_greedy)
+                f_pre = ex.submit(gen_level0)
+                greedy, pre = f_greedy.result(), f_pre.result()
+            for gens in (greedy, pre):
+                trace.thinker_calls += 1
+                trace.thinker_tokens += sum(g.tokens for g in gens)
+        else:
+            greedy = self._generate(
+                problem, "", n=1, max_tokens=cfg.max_tokens, temperature=0.0, trace=trace
+            )
         root = self._expand(greedy, "", source="greedy")
         v = self.judge.score(problem, [c.text for c in root], instructions=cfg.judge_instructions)
         trace.judge_calls += len(root)
@@ -271,16 +325,22 @@ class MetaCog:
         best_text = root[finished[0]].text if finished else None
         score, step = g_score, 0
         for level in range(max(1, cfg.max_rounds)):
-            u = 1.0 - score
+            # level 0 was sized from triage uncertainty (u = 1 - easy) and may
+            # already be generated concurrently with the greedy root.
+            u = 1.0 - easy if level == 0 and pre is not None else 1.0 - score
             n_br = max(1, round(cfg.n_min + u * (cfg.n_max - cfg.n_min)))
             if cfg.sketch_tokens <= 0:
-                gens = self._generate(
-                    problem,
-                    "",
-                    n=n_br,
-                    max_tokens=cfg.max_tokens,
-                    temperature=cfg.temperature,
-                    trace=trace,
+                gens = (
+                    pre
+                    if level == 0 and pre is not None
+                    else self._generate(
+                        problem,
+                        "",
+                        n=n_br,
+                        max_tokens=cfg.max_tokens,
+                        temperature=cfg.temperature,
+                        trace=trace,
+                    )
                 )
                 cands = cands + self._expand(gens, "")
             else:
@@ -290,13 +350,17 @@ class MetaCog:
                     prompt = SKETCH_PROMPT.format(problem=problem)
                 else:
                     prompt = RESKETCH_PROMPT.format(problem=problem, answer=best_text)
-                sk_gens = self._generate(
-                    prompt,
-                    "",
-                    n=n_br,
-                    max_tokens=cfg.sketch_tokens,
-                    temperature=cfg.temperature,
-                    trace=trace,
+                sk_gens = (
+                    pre
+                    if level == 0 and pre is not None
+                    else self._generate(
+                        prompt,
+                        "",
+                        n=n_br,
+                        max_tokens=cfg.sketch_tokens,
+                        temperature=cfg.temperature,
+                        trace=trace,
+                    )
                 )
                 sketches = [
                     Candidate(text=g.text, finished=False, source="sketch", parent=i)

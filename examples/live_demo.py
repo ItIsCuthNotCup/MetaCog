@@ -5,6 +5,7 @@ MODE (best_of_n default | stepwise | adaptive), STEP_TOKENS (384), MAX_STEPS (2)
 CASCADE (0.95 default, 0 disables; also stop_confidence for adaptive), N_MIN (2),
 N_MAX (6), SKETCH_TOKENS (0 = full-solution branches), EXPAND_MAX (3),
 ANSWER_PRIOR (unset = off; e.g. 0.5 adds Jev's bare-answer noul to each pick),
+TRIAGE (unset = off; e.g. 0.5, adaptive only — hard problems branch concurrently),
 PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
@@ -194,6 +195,7 @@ def main() -> None:
             sketch_tokens=int(os.environ.get("SKETCH_TOKENS", "0")),
             expand_max=int(os.environ.get("EXPAND_MAX", "3")),
             max_rounds=int(os.environ.get("MAX_ROUNDS", "1")),
+            triage=(float(os.environ["TRIAGE"]) if os.environ.get("TRIAGE") else None),
             answer_prior=answer_prior,
         )
     else:

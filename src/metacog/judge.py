@@ -32,6 +32,12 @@ ANSWER_PRIOR_INSTRUCTIONS = (
     "Is that final answer correct?"
 )
 
+TRIAGE_INSTRUCTIONS = (
+    "`path` is empty. Judge `problem` itself: is this problem EASY enough that a "
+    "strong language model would almost certainly answer it correctly on its first "
+    "attempt?"
+)
+
 FINISHED_QUESTIONS = {
     "is_complete": (
         "Does `path` reach a definite final answer to `problem` (not just a plan or partial work)?"

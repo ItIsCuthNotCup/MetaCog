@@ -51,6 +51,7 @@ class Trace(BaseModel):
     thinker_calls: int = 0
     judge_calls: int = 0
     thinker_tokens: int = 0
+    triage: float | None = None  # adaptive: Jev's easy-score for the bare problem
 
 
 class Result(BaseModel):

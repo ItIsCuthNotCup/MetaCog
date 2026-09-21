@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol
 
 import httpx
@@ -35,6 +37,9 @@ class Thinker(Protocol):
     ) -> list[Generation]: ...
 
 
+RETRY_STATUSES = {408, 409, 429, 500, 502, 503, 504, 522, 524}
+
+
 class OpenAICompatThinker:
     """Thinker backed by an OpenAI-compatible server (vLLM, llama.cpp, Ollama, OpenAI).
 
@@ -53,10 +58,23 @@ class OpenAICompatThinker:
       Servers without prefill support should use ``prefix_mode="prompt"`` or stick to
       ``mode="best_of_n"`` (which never sends a prefix).
 
+    ``base_url`` may or may not end in ``/v1`` (``https://api.openai.com/v1`` and
+    ``http://localhost:8000`` both work). Hosted gateways that need a key take
+    ``api_key`` (sent as a bearer token).
+
     Quirks tolerated automatically: servers that silently ignore ``n`` (detected once,
     then requests go sequential), ``finish_reason="stop"`` on token-truncated output
-    (repaired from ``usage``), and HTTP 200 bodies carrying an ``{"error": ...}``.
-    """
+    (repaired from ``usage``), HTTP 200 bodies carrying an ``{"error": ...}``, and
+    transient 429/5xx responses (retried with backoff). Reasoning models' side-channel
+    chain of thought (``reasoning_content`` / ``reasoning``) is folded into the
+    candidate text inside ``<think>`` tags so the judge can read it
+    (``include_reasoning=False`` to disable).
+
+    ``stream=True`` switches generation requests to SSE streaming
+    (``stream_options.include_usage``), which keeps the connection alive through
+    proxies that kill long-idle requests (e.g. Cloudflare's ~100s/524 timeout).
+    Chunks are accumulated back into the non-streamed response shape, so callers
+    see no difference."""
 
     def __init__(
         self,
@@ -70,9 +88,11 @@ class OpenAICompatThinker:
         prefix_mode: Literal["assistant", "prompt"] = "assistant",
         supports_n: bool = True,
         max_retries: int = 2,
+        include_reasoning: bool = True,
+        stream: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.rstrip("/").removesuffix("/v1")
         self.model = model
         self.api_key = api_key
         self.api = api
@@ -81,6 +101,8 @@ class OpenAICompatThinker:
         self.prefix_mode = prefix_mode
         self.supports_n = supports_n
         self.max_retries = max_retries
+        self.include_reasoning = include_reasoning
+        self.stream = stream
         self._client = client or httpx.Client(timeout=timeout)
 
     def _headers(self) -> dict[str, str]:
@@ -89,15 +111,99 @@ class OpenAICompatThinker:
             h["Authorization"] = f"Bearer {self.api_key}"
         return h
 
+    def _read_stream(self, resp: httpx.Response, *, chat: bool) -> dict:
+        """Accumulate SSE chunks back into the non-streamed response shape.
+
+        Servers that ignore ``stream: true`` answer with a plain JSON body;
+        detect that (content-type or no ``data:`` lines) and parse it directly.
+        """
+        raw = resp.read().decode(resp.encoding or "utf-8", errors="replace")
+        if resp.headers.get("content-type", "").startswith("application/json"):
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ThinkerError(
+                    f"stream returned JSON content-type but invalid body: {e}"
+                ) from e
+        parts: dict[int, dict] = {}
+        usage = None
+        saw_data = False
+        for line in raw.splitlines():
+            if not line or line.startswith(":") or not line.startswith("data:"):
+                continue  # blanks and SSE comments/keepalives
+            payload = line[len("data:") :].strip()
+            saw_data = True
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(chunk, dict) and "error" in chunk and "choices" not in chunk:
+                raise ThinkerError(f"stream chunk error: {chunk['error']}")
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            for ch in chunk.get("choices") or []:
+                acc = parts.setdefault(
+                    ch.get("index", 0),
+                    {"content": "", "reasoning": "", "text": "", "finish": None},
+                )
+                delta = ch.get("delta") or {}
+                acc["content"] += delta.get("content") or ""
+                acc["reasoning"] += delta.get("reasoning_content") or delta.get("reasoning") or ""
+                acc["text"] += ch.get("text") or ""
+                if ch.get("finish_reason"):
+                    acc["finish"] = ch["finish_reason"]
+        if not parts and not saw_data:
+            # Server ignored stream=true and sent a plain body without a
+            # JSON content-type; try to parse the raw text as a completion.
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ThinkerError("stream returned no SSE data and non-JSON body") from e
+        choices = []
+        for idx in sorted(parts):
+            acc = parts[idx]
+            if chat:
+                msg: dict = {"content": acc["content"]}
+                if acc["reasoning"]:
+                    msg["reasoning_content"] = acc["reasoning"]
+                choices.append({"index": idx, "message": msg, "finish_reason": acc["finish"]})
+            else:
+                choices.append({"index": idx, "text": acc["text"], "finish_reason": acc["finish"]})
+        return {"choices": choices, "usage": usage}
+
     def _post(self, path: str, body: dict) -> dict:
         resp = None
+        use_stream = self.stream and path.endswith("/completions")
+        if use_stream:
+            body = {
+                **body,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
         # Retry transient transport failures (disconnects, read timeouts, refused
         # connections) with a short backoff: 1s, 2s, ... up to max_retries retries.
         for attempt in range(self.max_retries + 1):
             try:
-                resp = self._client.post(
-                    f"{self.base_url}{path}", json=body, headers=self._headers()
-                )
+                if use_stream:
+                    with self._client.stream(
+                        "POST",
+                        f"{self.base_url}{path}",
+                        json=body,
+                        headers=self._headers(),
+                    ) as resp:
+                        if resp.status_code >= 400:
+                            resp.read()  # make .text available after the block
+                        else:
+                            return self._read_stream(resp, chat=path.endswith("/chat/completions"))
+                else:
+                    resp = self._client.post(
+                        f"{self.base_url}{path}", json=body, headers=self._headers()
+                    )
+                if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:
+                    time.sleep(2 * (attempt + 1))
+                    continue
                 break
             except httpx.TransportError as e:
                 if attempt >= self.max_retries:
@@ -124,13 +230,22 @@ class OpenAICompatThinker:
         stop: list[str] | None,
     ) -> list[Generation]:
         choices = data.get("choices", [])
+        if not choices:
+            raise ThinkerError("no choices in response")
         total = (data.get("usage") or {}).get("completion_tokens")
         # Only an aggregate is reported; split it evenly across the returned choices.
         per_choice = total // len(choices) if total is not None and choices else 0
         gens = []
         for choice in choices:
             if chat:
-                text = (choice.get("message") or {}).get("content") or ""
+                msg = choice.get("message") or {}
+                text = msg.get("content") or ""
+                # Reasoning models (DeepSeek, Qwen, GLM, ...) return their chain of
+                # thought in a side field; fold it in so the judge sees the reasoning
+                # and a token-truncated response is not an empty string.
+                reasoning = msg.get("reasoning_content") or msg.get("reasoning")
+                if reasoning and self.include_reasoning:
+                    text = f"<think>\n{reasoning}\n</think>\n{text}"
             else:
                 text = choice.get("text") or ""
             finished = choice.get("finish_reason") == "stop"
@@ -160,6 +275,19 @@ class OpenAICompatThinker:
         go sequential."""
         gens: list[Generation] = []
         while len(gens) < n:
+            if not self.supports_n and n - len(gens) > 1:
+                # Endpoint only accepts n=1: fetch the rest concurrently
+                # (order preserved; first error propagates).
+                remaining = n - len(gens)
+                with ThreadPoolExecutor(max_workers=min(remaining, 8)) as pool:
+                    datas = list(
+                        pool.map(lambda _i: self._post(path, make_body(1)), range(remaining))
+                    )
+                for d in datas:
+                    gens.extend(
+                        self._to_generations(d, chat=chat, max_tokens=max_tokens, stop=stop)
+                    )
+                break
             want = (n - len(gens)) if self.supports_n else 1
             try:
                 data = self._post(path, make_body(want))

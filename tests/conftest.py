@@ -33,8 +33,10 @@ class FakeThinker:
 class FakeJudge:
     """Prefers the candidate containing "CORRECT"; records calls."""
 
-    def __init__(self, confidence: float = 0.7):
+    def __init__(self, confidence: float = 0.7, scores: list[list[float]] | None = None):
         self.confidence = confidence
+        # optional queue: per-score()-call raw noul values, overriding CORRECT matching
+        self.scores = list(scores) if scores else None
         self.calls: list[dict] = []
         self.assess_calls: list[dict] = []
 
@@ -50,7 +52,10 @@ class FakeJudge:
 
     def score(self, problem, candidates, *, instructions=None):
         self.calls.append({"kind": "score", "problem": problem, "candidates": list(candidates)})
-        raw = [1.0 if "CORRECT" in c else 0.1 for c in candidates]
+        if self.scores is not None:
+            raw = self.scores.pop(0)
+        else:
+            raw = [1.0 if "CORRECT" in c else 0.1 for c in candidates]
         total = sum(raw)
         choice = max(range(len(raw)), key=lambda i: raw[i])
         return Verdict(

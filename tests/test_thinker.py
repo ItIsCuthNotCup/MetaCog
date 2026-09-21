@@ -117,7 +117,8 @@ def test_n_greater_than_1_400_falls_back_to_sequential():
     t = _thinker(handler, base_url="http://x", model="m", api="chat")
     gens = t.generate("prob", "", n=3, max_tokens=16, temperature=0.2)
     assert len(gens) == 3
-    assert calls["n"] == 4  # one failed n=3 + three sequential n=1
+    assert calls["n"] == 4  # one failed n=3 + three n=1 requests (concurrent fallback)
+    assert [g.text for g in gens] == ["gen2", "gen3", "gen4"]  # order preserved
 
 
 def test_http_error_raises_thinker_error_with_body():

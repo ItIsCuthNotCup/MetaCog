@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol
 
 import httpx
@@ -251,6 +252,19 @@ class OpenAICompatThinker:
         go sequential."""
         gens: list[Generation] = []
         while len(gens) < n:
+            if not self.supports_n and n - len(gens) > 1:
+                # Endpoint only accepts n=1: fetch the rest concurrently
+                # (order preserved; first error propagates).
+                remaining = n - len(gens)
+                with ThreadPoolExecutor(max_workers=min(remaining, 8)) as pool:
+                    datas = list(
+                        pool.map(lambda _i: self._post(path, make_body(1)), range(remaining))
+                    )
+                for d in datas:
+                    gens.extend(
+                        self._to_generations(d, chat=chat, max_tokens=max_tokens, stop=stop)
+                    )
+                break
             want = (n - len(gens)) if self.supports_n else 1
             try:
                 data = self._post(path, make_body(want))

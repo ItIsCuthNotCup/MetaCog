@@ -1,6 +1,6 @@
 """Live demo: wrap any OpenAI-compatible thinker in MetaCog with a Jev judge and dump full traces.
 
-Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, N_PATHS, PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
+Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, THINKER_STREAM, N_PATHS, CASCADE (0.95 default, 0 disables), PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
 
@@ -172,6 +172,11 @@ def main() -> None:
             max_tokens=max_tokens,
             temperature=0.9,
             greedy_anchor=True,  # candidate 0 IS the baseline: the judge can only gain
+            cascade_confidence=(
+                float(os.environ["CASCADE"])
+                if os.environ.get("CASCADE", "0.95") not in ("", "0")
+                else None
+            ),
         ),
     )
     out = []

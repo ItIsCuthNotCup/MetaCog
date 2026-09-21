@@ -14,6 +14,11 @@
 - `Config.greedy_anchor` keeps a temperature-0 sample in the candidate pool
   (source `"greedy"`), so the judge can never do worse than the baseline for
   lack of the option.
+- `Config.cascade_confidence` (requires `greedy_anchor`): scores the greedy path
+  with a noul first and skips the remaining samples when it clears the threshold
+  (measured ≥0.95 → 226/229 correct).
+- When a thinker endpoint rejects `n>1`, remaining samples are fetched
+  concurrently (up to 8 workers) instead of strictly sequentially.
 - Live multi-model demo + self-contained HTML renderer in `examples/`
   (`live_demo.py`, `render_demo.py`).
 

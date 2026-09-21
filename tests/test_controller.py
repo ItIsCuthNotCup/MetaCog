@@ -89,6 +89,82 @@ def test_greedy_anchor_with_n_paths_1_is_greedy_only():
     assert thinker.calls[0]["temperature"] == 0.0
 
 
+def test_cascade_accepts_high_confidence_greedy_without_sampling():
+    thinker = FakeThinker([[gen("greedy CORRECT answer", finished=True)]])
+    judge = FakeJudge(scores=[[0.99]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            greedy_anchor=True,
+            cascade_confidence=0.95,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert len(thinker.calls) == 1  # no sampled generations
+    assert thinker.calls[0]["n"] == 1 and thinker.calls[0]["temperature"] == 0.0
+    rnd = result.trace.rounds[0]
+    assert len(rnd.candidates) == 1
+    assert rnd.kept == [0]
+    assert result.trace.judge_calls == 1
+    assert result.answer == "greedy CORRECT answer"
+    assert result.finished
+
+
+def test_cascade_below_threshold_falls_through_to_full_pool():
+    thinker = FakeThinker(
+        [[gen("greedy answer", finished=True)], [gen("sampled A"), gen("sampled B")]]
+    )
+    # first score() call (cascade check) low; second (full pool) picks greedy
+    judge = FakeJudge(scores=[[0.3], [0.9, 0.1, 0.1]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            greedy_anchor=True,
+            cascade_confidence=0.95,
+            split_generations=False,
+            strategy="noul",
+        ),
+    )
+    result = mc.run("p")
+    assert len(thinker.calls) == 2
+    assert thinker.calls[1]["n"] == 2 and thinker.calls[1]["temperature"] == 0.8
+    assert len(result.trace.rounds[0].candidates) == 3
+    assert result.trace.judge_calls == 1 + 3  # cascade check + full-pool noul
+    assert result.answer == "greedy answer"
+
+
+def test_cascade_requires_greedy_anchor():
+    with pytest.raises(ValueError, match="greedy_anchor"):
+        MetaCog(FakeThinker([]), FakeJudge(), Config(cascade_confidence=0.9))
+
+
+def test_cascade_skipped_when_greedy_unfinished():
+    thinker = FakeThinker([[gen("greedy truncated", finished=False)], [gen("sA"), gen("sB")]])
+    judge = FakeJudge(scores=[[0.9, 0.1, 0.1]])  # full-pool call; cascade never runs
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            greedy_anchor=True,
+            cascade_confidence=0.95,
+            split_generations=False,
+            strategy="noul",
+        ),
+    )
+    result = mc.run("p")
+    assert len(thinker.calls) == 2  # no short-circuit on an unfinished path
+    assert len(result.trace.rounds[0].candidates) == 3
+
+
 @pytest.mark.parametrize("strategy", ["noul", "choice"])
 def test_single_candidate_skips_judge(strategy):
     thinker = FakeThinker([[gen("only path", finished=True)]])

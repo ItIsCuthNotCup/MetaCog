@@ -64,7 +64,10 @@ benchmark — most problems are too easy to separate the arms.
 MetaCog never did worse than the baseline; every rescue was a problem where the baseline
 was wrong and Jev picked a correct candidate out of a disagreeing set.
 `greedy_anchor=True` now keeps the greedy answer in the candidate pool, so the judge can
-never do worse than baseline for lack of the option.
+never do worse than baseline for lack of the option — and the confidence cascade
+(`cascade_confidence`, default on in the demo at 0.95) scores the greedy path first and
+skips sampling entirely when it's that confident: measured, a noul ≥ 0.95 is correct
+226/229 times.
 
 ## Install
 

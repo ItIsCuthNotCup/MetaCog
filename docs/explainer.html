@@ -1,148 +1,139 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MetaCog — how it thinks</title>
+<title>MetaCog — how it works</title>
 <style>
-:root{--bg:#0b0f17;--card:#121826;--line:#1f2937;--txt:#e5e7eb;--mute:#8b93a7;--acc:#7c9cff;--ok:#34d399;--bad:#f87171;--warn:#fbbf24}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.45 -apple-system,Inter,Segoe UI,Roboto,sans-serif}
-.wrap{max-width:1080px;margin:0 auto;padding:36px 24px 60px}
-h1{font-size:44px;line-height:1.1;margin:0 0 8px;letter-spacing:-.02em}
-h1 b{color:var(--acc)}
-.sub{color:var(--mute);font-size:18px;margin:0 0 28px}
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:34px}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
-.kpi .n{font-size:34px;font-weight:700;letter-spacing:-.02em}.kpi .n.ok{color:var(--ok)}.kpi .l{color:var(--mute);font-size:13px;margin-top:2px}
-.stage{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;position:relative;min-height:560px}
-.steps{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
-.step{font-size:12px;color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:4px 10px;transition:.3s}
-.step.on{color:#fff;background:var(--acc);border-color:var(--acc)}.step.done{color:var(--ok);border-color:var(--ok)}
-.problem{background:#0f1523;border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:14px;color:#cbd5e1;max-height:112px;overflow:hidden;position:relative}
-.problem:after{content:"";position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(transparent,#0f1523)}
-.tag{display:inline-block;font-size:12px;padding:3px 9px;border-radius:999px;background:#1e293b;color:#cbd5e1;margin-right:6px}
-.row{display:flex;align-items:center;gap:12px;margin:14px 0;min-height:30px}
-.jev{display:inline-flex;align-items:center;gap:8px;background:#151b2b;border:1px solid #2a3350;border-radius:10px;padding:8px 12px;font-size:14px;opacity:0;transform:translateY(6px);transition:.4s}
-.jev.show{opacity:1;transform:none}
-.jev .dot{width:10px;height:10px;border-radius:50%;background:var(--acc);box-shadow:0 0 12px var(--acc)}
-.paths{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:6px}
-.path{background:#0f1523;border:1px solid var(--line);border-radius:12px;padding:12px;opacity:0;transform:translateY(10px);transition:.45s;position:relative;min-height:170px}
-.path.show{opacity:1;transform:none}
-.path h4{margin:0 0 6px;font-size:13px;color:var(--mute);font-weight:600}
-.bar{height:6px;background:#1e293b;border-radius:3px;overflow:hidden;margin:8px 0}
-.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width 1.6s ease-in-out}
-.ans{font-size:26px;font-weight:700;margin-top:6px;opacity:0;transition:.3s}.ans.show{opacity:1}
-.ans.right{color:var(--ok)}.ans.wrong{color:var(--bad)}
-.score{font-size:13px;color:var(--mute);margin-top:6px;opacity:0;transition:.3s}.score.show{opacity:1}
-.score b{color:var(--txt)}
-.meter{height:8px;background:#1e293b;border-radius:4px;overflow:hidden;margin-top:4px}.meter i{display:block;height:100%;width:0;transition:width .9s;background:var(--warn)}
-.meter i.p{background:#a78bfa}.meter i.t{background:var(--ok)}
-.path.win{border-color:var(--ok);box-shadow:0 0 0 2px rgba(52,211,153,.35),0 0 30px rgba(52,211,153,.15)}
-.path.dim{opacity:.35}
-.badge{position:absolute;top:-10px;right:10px;background:var(--ok);color:#052e1c;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;opacity:0;transition:.3s}.badge.show{opacity:1}
-.verdict{margin-top:20px;background:#0f1523;border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;gap:22px;align-items:center;opacity:0;transition:.5s}
-.verdict.show{opacity:1}
-.verdict .big{font-size:22px;font-weight:700}
-.ctrl{position:absolute;top:18px;right:18px;display:flex;gap:8px}
-button{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:9px;padding:7px 12px;font-size:13px;cursor:pointer}button:hover{background:#273449}
-.caption{color:var(--mute);font-size:13px;margin-top:10px;min-height:20px}
-.res{margin-top:34px}
-.res h2{font-size:22px;margin:0 0 6px}.res p{color:var(--mute);margin:0 0 14px;font-size:14px}
-.chart{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.c{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
-.c h5{margin:0 0 10px;font-size:14px;color:var(--mute);font-weight:600}
-.hb{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0}.hb span{width:66px;color:var(--mute)}
-.hb .t{flex:1;height:14px;background:#1e293b;border-radius:7px;overflow:hidden}.hb .t i{display:block;height:100%;width:0;transition:width 1.2s .2s}
-.hb.base .t i{background:#475569}.hb.mc .t i{background:var(--ok)}.hb em{font-style:normal;width:44px;text-align:right}
-.foot{margin-top:26px;color:var(--mute);font-size:12px}
-.foot a{color:var(--acc)}
-@media(max-width:820px){.paths,.chart{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:1fr}h1{font-size:32px}}
-</style></head><body><div class="wrap">
+:root{--bg:#0b0f17;--node:#151c2c;--line:#334155;--txt:#f1f5f9;--mute:#94a3b8;--acc:#7c9cff;--ok:#34d399;--bad:#f87171;--warn:#fbbf24;--pur:#c084fc}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:16px/1.3 -apple-system,Inter,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center}
+.card{width:min(100vw,100vh);aspect-ratio:1/1;position:relative;background:radial-gradient(circle at 50% 0%,#141c30 0%,var(--bg) 60%)}
+svg{width:100%;height:100%;display:block}
+text{fill:var(--txt);font-family:inherit}
+.t-mute{fill:var(--mute)}
+.node rect,.node polygon{fill:var(--node);stroke:var(--line);stroke-width:2;transition:stroke .4s,filter .4s,fill .4s}
+.node{opacity:0;transform:translateY(10px);transition:opacity .45s,transform .45s}
+.node.show{opacity:1;transform:none}
+.node.win rect{stroke:var(--ok);fill:#0f2a22;filter:drop-shadow(0 0 14px rgba(52,211,153,.6))}
+.node.lose{opacity:.28}
+.node.warn polygon{stroke:var(--warn);filter:drop-shadow(0 0 10px rgba(251,191,36,.5))}
+.edge{fill:none;stroke:var(--line);stroke-width:3;stroke-linecap:round;stroke-dasharray:1000;stroke-dashoffset:1000;transition:stroke-dashoffset 1s ease-in-out,stroke .4s,opacity .4s}
+.edge.show{stroke-dashoffset:0}
+.edge.win{stroke:var(--ok);stroke-width:5;filter:drop-shadow(0 0 8px rgba(52,211,153,.7))}
+.edge.lose{opacity:.2}
+.edge.dash{stroke-dasharray:8 8;stroke-dashoffset:0;opacity:0}
+.edge.dash.show{opacity:.35}
+.ans{font-size:38px;font-weight:800}
+.ans.right{fill:var(--ok)}.ans.wrong{fill:var(--bad)}
+.meter{fill:#1e293b}
+.fill{transition:width 1s ease-out}
+.jev{fill:var(--acc)}
+.chip{opacity:0;transition:opacity .4s}
+.chip.show{opacity:1}
+.cap{position:absolute;left:0;right:0;bottom:3.2%;text-align:center;font-size:clamp(14px,2.3vmin,26px);color:var(--txt);padding:0 6%;min-height:2.6em}
+.cap b{color:var(--acc)}
+.title{position:absolute;top:2.6%;left:0;right:0;text-align:center;font-size:clamp(18px,3.4vmin,38px);font-weight:800;letter-spacing:-.02em}
+.title span{color:var(--acc)}
+.ctrl{position:absolute;top:2.5%;right:2.5%;display:flex;gap:6px}
+button{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;opacity:.6}button:hover{opacity:1}
+.pulse{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+</style></head><body>
+<div class="card">
+<div class="title">MetaCog: <span>think in branches, let a judge pick</span></div>
+<div class="ctrl"><button id="replay">↻ Replay</button></div>
+<svg viewBox="0 0 1000 1000" id="s">
+ <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker></defs>
 
-<h1>MetaCog: any model <b>+ an independent judge</b><br>= a smarter model.</h1>
-<p class="sub">The model thinks several ways at once. A small, separate judge (Jev) scores each path <i>and</i> each bare answer. Only the most trusted full answer is returned.</p>
+ <!-- edges -->
+ <path class="edge" id="e0" d="M500 168 V210"/>
+ <path class="edge" id="e1" d="M500 290 V340"/>
+ <path class="edge dash" id="eStop" d="M590 380 H720 V430"/>
+ <path class="edge" id="e2" d="M500 420 V470"/>
+ <path class="edge" id="e3a" d="M500 470 C500 500 200 500 200 540"/>
+ <path class="edge" id="e3b" d="M500 470 C500 500 400 500 400 540"/>
+ <path class="edge" id="e3c" d="M500 470 C500 500 600 500 600 540"/>
+ <path class="edge" id="e3d" d="M500 470 C500 500 800 500 800 540"/>
+ <path class="edge" id="e4a" d="M200 760 C200 800 500 800 500 830"/>
+ <path class="edge" id="e4b" d="M400 760 C400 800 500 800 500 830"/>
+ <path class="edge" id="e4c" d="M600 760 C600 800 500 800 500 830"/>
+ <path class="edge" id="e4d" d="M800 760 C800 800 500 800 500 830"/>
 
-<div class="kpis">
-  <div class="kpi"><div class="n">75.0% → <span class="ok">79.4%</span></div><div class="l">10 hosted models, 856 paired problems (GPQA Diamond, AIME 24/25, MATH-500 L5, harder counting) — v0.2, p ≈ 6·10⁻⁶</div></div>
-  <div class="kpi"><div class="n">54 fixed · 16 lost</div><div class="l">problems the model alone got wrong that MetaCog got right, and the reverse</div></div>
-  <div class="kpi"><div class="n">≈ $0.0003</div><div class="l">judge cost per problem; the model does ~2–3× the tokens of a single answer</div></div>
-</div>
+ <!-- 1 question -->
+ <g class="node" id="n0"><rect x="250" y="108" width="500" height="60" rx="14"/>
+  <text x="500" y="146" text-anchor="middle" font-size="24" font-weight="700">A hard question</text></g>
 
-<div class="stage" id="stage">
-  <div class="ctrl"><button id="replay">▶ Replay</button><button id="speed">Speed: 1×</button></div>
-  <div class="steps">
-    <span class="step" data-s="0">1 · Problem</span><span class="step" data-s="1">2 · Jev triage</span><span class="step" data-s="2">3 · Think 4 ways in parallel</span>
-    <span class="step" data-s="3">4 · Jev scores each path</span><span class="step" data-s="4">5 · Jev scores each bare answer</span><span class="step" data-s="5">6 · Pick</span>
-  </div>
-  <div><span class="tag">GPQA Diamond · organic chemistry</span><span class="tag">thinker: Kimi K2.5</span><span class="tag">judge: Jev (System-One)</span><span class="tag">real run, 58 s</span></div>
-  <div class="problem" style="margin-top:10px">Pinacol rearrangement: vicinal diols react with acid via a carbocation and a 1,2-shift. For the compounds below, which are the possible products?<br>
-  3-methyl-4-phenylhexane-3,4-diol + H⁺ → A &nbsp;·&nbsp; 3-(4-hydroxyphenyl)-2-phenylpentane-2,3-diol + H⁺ → B &nbsp;·&nbsp; 1,1,2-tris(4-methoxyphenyl)-2-phenylethane-1,2-diol + H⁺ → C<br>
-  (A) … (B) A = 3-ethyl-3-phenylpentan-2-one, B = 3-(4-hydroxyphenyl)-3-phenylpentan-2-one, C = 1,2,2-tris(4-methoxyphenyl)-2-phenylethan-1-one &nbsp; (C) … &nbsp; (D) A = 3-ethyl-3-phenylpentan-2-one, B = 3-(4-hydroxyphenyl)-3-phenylpentan-2-one, C = 2,2,2-tris(4-methoxyphenyl)-1-phenylethan-1-one</div>
+ <!-- 2 first answer -->
+ <g class="node" id="n1"><rect x="330" y="210" width="340" height="80" rx="14"/>
+  <text x="500" y="243" text-anchor="middle" font-size="20" font-weight="700">Model writes one answer</text>
+  <text x="500" y="272" text-anchor="middle" font-size="17" class="t-mute">(exactly what it would say alone)</text>
+  <text x="640" y="258" text-anchor="middle" class="ans wrong" id="a0" style="opacity:0;transition:.4s">B</text></g>
 
-  <div class="row"><div class="jev" id="triage"><span class="dot"></span><span>Jev, from the problem alone: <b>31% chance a model gets this first try</b> → hard problem → start <b>4 paths at once</b>, don't wait for the first answer.</span></div></div>
+ <!-- 3 judge diamond -->
+ <g class="node" id="n2"><polygon points="500,330 610,380 500,430 390,380"/>
+  <text x="500" y="374" text-anchor="middle" font-size="16" font-weight="700"><tspan class="jev">Jev</tspan>: sure it's right?</text>
+  <text x="500" y="400" text-anchor="middle" font-size="18" font-weight="800" id="conf"></text></g>
+ <g class="node" id="nStop"><rect x="650" y="430" width="140" height="44" rx="10"/>
+  <text x="720" y="458" text-anchor="middle" font-size="15" class="t-mute">yes → done ✓</text></g>
+ <text x="530" y="455" font-size="15" fill="var(--warn)" id="noLbl" opacity="0" style="transition:.4s">no → branch</text>
 
-  <div class="paths" id="paths"></div>
+ <!-- 4 paths -->
+ <g id="paths"></g>
 
-  <div class="verdict" id="verdict">
-    <div><div class="big" id="vbig"></div><div class="caption" id="vsmall"></div></div>
-  </div>
-  <div class="caption" id="cap"></div>
-</div>
-
-<div class="res">
-  <h2>Measured, paired, same problems</h2>
-  <p>Grey = model alone (one answer). Green = MetaCog (v0.2, Jev picks among ~3 full answers). 10 models pooled; partial denominators where provider limits cut runs short.</p>
-  <div class="chart" id="chart"></div>
-  <p style="margin-top:14px">Next version (in test, 130–170 paired rows each): adding Jev's <b>bare-answer check</b> to the pick moves 79.5% → <b>84.1%</b> vs v0.2 (+8 fixed / −2 lost), with <b>23% fewer tokens</b>; adding triage makes it <b>1.6× faster</b>. Not yet significant — numbers will update.</p>
-</div>
-
-<p class="foot">MIT licensed · works with any OpenAI-compatible API or local model · <a href="https://github.com/ItIsCuthNotCup/MetaCog">github.com/ItIsCuthNotCup/MetaCog</a>. No tools, no web search: pure text generation, graded against the benchmark keys.</p>
+ <!-- 5 final -->
+ <g class="node" id="n5"><rect x="330" y="830" width="340" height="70" rx="14"/>
+  <text x="500" y="861" text-anchor="middle" font-size="18" font-weight="700" id="finT">Judge picks the best path</text>
+  <text x="500" y="886" text-anchor="middle" font-size="15" class="t-mute" id="finS"></text></g>
+</svg>
+<div class="cap" id="cap"></div>
 </div>
 
 <script>
-const PATHS=[
- {name:"Path 1 · greedy (what the model alone says)",ans:"B",ok:false,text:0.75,prior:0.45},
- {name:"Path 2 · sampled",ans:"D",ok:true,text:0.75,prior:0.62},
- {name:"Path 3 · sampled",ans:"D",ok:true,text:0.69,prior:0.62},
- {name:"Path 4 · sampled",ans:"B",ok:false,text:0.65,prior:0.45},
-];
-const W=0.5;
-const BENCH=[["Harder counting",64.2,70.1],["MATH-500 L5",93.1,96.9],["GPQA Diamond",70.7,74.2],["AIME 24+25",75.9,81.7]];
-let speed=1,run=0;
-const $=s=>document.querySelector(s);
-const sleep=ms=>new Promise(r=>setTimeout(r,ms/speed));
-function steps(i){document.querySelectorAll('.step').forEach(e=>{const s=+e.dataset.s;e.className='step'+(s<i?' done':s===i?' on':'')})}
-function buildPaths(){$('#paths').innerHTML=PATHS.map((p,i)=>`
- <div class="path" id="p${i}"><span class="badge">PICKED</span><h4>${p.name}</h4>
- <div class="bar"><i></i></div>
- <div class="ans ${p.ok?'right':'wrong'}">${p.ans} <small style="font-size:12px;color:var(--mute);font-weight:400">${p.ok?'✓ correct':'✗ wrong'}</small></div>
- <div class="score s1">reasoning looks right: <b>${p.text.toFixed(2)}</b><div class="meter"><i></i></div></div>
- <div class="score s2">bare answer "${p.ans}" is right: <b>${p.prior.toFixed(2)}</b><div class="meter"><i class="p"></i></div></div>
- <div class="score s3">combined: <b>${(p.text+W*p.prior).toFixed(2)}</b><div class="meter"><i class="t"></i></div></div>
- </div>`).join('')}
-async function play(){
- const my=++run;const ok=()=>my===run;
- buildPaths();$('#triage').classList.remove('show');$('#verdict').classList.remove('show');$('#cap').textContent='';
- steps(0);$('#cap').textContent='A real GPQA Diamond question. Kimi K2.5 alone answers B — wrong.';await sleep(1800);if(!ok())return;
- steps(1);$('#triage').classList.add('show');$('#cap').textContent='Triage: Jev reads only the question and estimates difficulty. Easy → one answer is enough. Hard → branch now.';await sleep(2600);if(!ok())return;
- steps(2);$('#cap').textContent='Four full solutions are written at the same time (temperature 0 for path 1, sampled for the rest).';
- PATHS.forEach((p,i)=>setTimeout(()=>{if(!ok())return;const el=$('#p'+i);el.classList.add('show');el.querySelector('.bar i').style.width='100%';},i*220/speed));
- await sleep(2300);if(!ok())return;
- PATHS.forEach((p,i)=>$('#p'+i+' .ans').classList.add('show'));$('#cap').textContent='They disagree: B, D, D, B. Which one to trust?';await sleep(1800);if(!ok())return;
- steps(3);$('#cap').textContent='Jev reads each full reasoning path separately (it never sees the others) and gives P(correct). Paths 1 and 2 tie at 0.75.';
- PATHS.forEach((p,i)=>{const s=$('#p'+i+' .s1');s.classList.add('show');s.querySelector('i').style.width=(p.text*100)+'%'});await sleep(3000);if(!ok())return;
- steps(4);$('#cap').textContent='Second, independent look: Jev is shown only "Final answer: B" / "Final answer: D" with no reasoning. D looks more plausible on its own.';
- PATHS.forEach((p,i)=>{const s=$('#p'+i+' .s2');s.classList.add('show');s.querySelector('i').style.width=(p.prior*100)+'%'});await sleep(3000);if(!ok())return;
- steps(5);$('#cap').textContent='Combined score = reasoning + ½ × bare-answer. The tie breaks toward D.';
- PATHS.forEach((p,i)=>{const s=$('#p'+i+' .s3');s.classList.add('show');s.querySelector('i').style.width=((p.text+W*p.prior)/1.2*100)+'%'});await sleep(1800);if(!ok())return;
- PATHS.forEach((p,i)=>{const el=$('#p'+i);if(i===1){el.classList.add('win');el.querySelector('.badge').classList.add('show')}else el.classList.add('dim')});
- $('#vbig').innerHTML='Answer: <span style="color:var(--ok)">D ✓</span> &nbsp;<span style="color:var(--mute);font-weight:400;font-size:16px">model alone said</span> <span style="color:var(--bad)">B ✗</span>';
- $('#vsmall').textContent='7 judge calls (≈ $0.0004), 2 thinker requests, 8.6k tokens, 58 s. The final answer is always a complete solution — never a sketch.';
- $('#verdict').classList.add('show');document.querySelectorAll('.step').forEach(e=>e.className='step done');
+// Real run: GPQA Diamond (organic chemistry), thinker Kimi K2.5, judge Jev. Model alone: B (wrong). Correct: D.
+const P=[{x:200,ans:"B",ok:false,text:.75,prior:.45,lbl:"first answer"},{x:400,ans:"D",ok:true,text:.75,prior:.62,lbl:"path 2"},{x:600,ans:"D",ok:true,text:.69,prior:.62,lbl:"path 3"},{x:800,ans:"B",ok:false,text:.65,prior:.45,lbl:"path 4"}];
+const W=.5;
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let run=0;
+function build(){
+ $('#paths').innerHTML=P.map((p,i)=>`<g class="node" id="p${i}">
+  <rect x="${p.x-85}" y="540" width="170" height="220" rx="14"/>
+  <text x="${p.x}" y="566" text-anchor="middle" font-size="14" class="t-mute">${p.lbl}</text>
+  <text x="${p.x}" y="620" text-anchor="middle" class="ans ${p.ok?'right':'wrong'}" id="pa${i}" style="opacity:0;transition:.4s">${p.ans}</text>
+  <g class="chip" id="c1_${i}"><text x="${p.x-70}" y="660" font-size="13" class="t-mute">reasoning</text>
+   <rect class="meter" x="${p.x-70}" y="668" width="140" height="10" rx="5"/><rect class="fill" x="${p.x-70}" y="668" width="0" height="10" rx="5" fill="var(--warn)" id="m1_${i}"/>
+   <text x="${p.x+70}" y="661" text-anchor="end" font-size="13" font-weight="700">${p.text.toFixed(2)}</text></g>
+  <g class="chip" id="c2_${i}"><text x="${p.x-70}" y="702" font-size="13" class="t-mute">bare answer "${p.ans}"</text>
+   <rect class="meter" x="${p.x-70}" y="710" width="140" height="10" rx="5"/><rect class="fill" x="${p.x-70}" y="710" width="0" height="10" rx="5" fill="var(--pur)" id="m2_${i}"/>
+   <text x="${p.x+70}" y="703" text-anchor="end" font-size="13" font-weight="700">${p.prior.toFixed(2)}</text></g>
+  <g class="chip" id="c3_${i}"><text x="${p.x}" y="748" text-anchor="middle" font-size="16" font-weight="800">total ${(p.text+W*p.prior).toFixed(2)}</text></g>
+ </g>`).join('');
 }
-$('#replay').onclick=play;
-$('#speed').onclick=()=>{speed=speed===1?2:speed===2?0.5:1;$('#speed').textContent='Speed: '+speed+'×'};
-$('#chart').innerHTML=BENCH.map(([n,b,m])=>`<div class="c"><h5>${n}</h5>
- <div class="hb base"><span>alone</span><div class="t"><i data-w="${b}"></i></div><em>${b.toFixed(1)}%</em></div>
- <div class="hb mc"><span>MetaCog</span><div class="t"><i data-w="${m}"></i></div><em>${m.toFixed(1)}%</em></div>
- <div style="font-size:12px;color:var(--ok);margin-top:6px">+${(m-b).toFixed(1)} pts</div></div>`).join('');
-setTimeout(()=>document.querySelectorAll('.hb i').forEach(i=>i.style.width=i.dataset.w+'%'),300);
-play();
+function cap(t){$('#cap').innerHTML=t}
+async function play(){
+ const my=++run, ok=()=>my===run;
+ build();$$('.node,.edge').forEach(e=>e.classList.remove('show','win','lose','warn'));$$('.chip').forEach(e=>e.classList.remove('show'));
+ $('#a0').style.opacity=0;$('#conf').textContent='';$('#noLbl').setAttribute('opacity',0);$('#finT').textContent='Judge picks the best path';$('#finS').textContent='';
+ await sleep(300);
+ $('#n0').classList.add('show');cap('1 · A question comes in.');await sleep(1500);if(!ok())return;
+ $('#e0').classList.add('show');await sleep(500);$('#n1').classList.add('show');cap('2 · The model answers once — like normal.');await sleep(1400);if(!ok())return;
+ $('#a0').style.opacity=1;await sleep(1200);if(!ok())return;
+ $('#e1').classList.add('show');await sleep(500);$('#n2').classList.add('show');cap('3 · An independent judge, <b>Jev</b>, reads the answer. Confident → we\'re done (most easy questions stop here).');
+ $('#eStop').classList.add('show');$('#nStop').classList.add('show');await sleep(2200);if(!ok())return;
+ $('#conf').textContent='75% — not sure';$('#n2').classList.add('warn');cap('Only 75% sure. Not enough.');await sleep(1600);if(!ok())return;
+ $('#noLbl').setAttribute('opacity',1);$('#e2').classList.add('show');$('#nStop').classList.add('lose');$('#eStop').classList.remove('show');
+ cap('4 · Not sure → <b>branch</b>. The less sure Jev is, the more paths the model writes, all at once.');await sleep(800);if(!ok())return;
+ for(const i of [0,1,2,3]){$('#e3'+'abcd'[i]).classList.add('show');await sleep(150)}
+ await sleep(500);P.forEach((p,i)=>setTimeout(()=>ok()&&$('#p'+i).classList.add('show'),i*180));await sleep(1600);if(!ok())return;
+ P.forEach((p,i)=>$('#pa'+i).style.opacity=1);cap('Four full answers. They disagree: B, D, D, B.');await sleep(2000);if(!ok())return;
+ cap('5 · Jev reads each path <b>separately</b> and scores how right the reasoning looks.');
+ P.forEach((p,i)=>{$('#c1_'+i).classList.add('show');$('#m1_'+i).setAttribute('width',140*p.text)});await sleep(2600);if(!ok())return;
+ cap('6 · Second look: Jev sees <b>only the bare answer</b> — no reasoning — and scores that too.');
+ P.forEach((p,i)=>{$('#c2_'+i).classList.add('show');$('#m2_'+i).setAttribute('width',140*p.prior)});await sleep(2600);if(!ok())return;
+ cap('Add them up. The tie between B and D breaks.');P.forEach((p,i)=>$('#c3_'+i).classList.add('show'));await sleep(1600);if(!ok())return;
+ for(const i of [0,1,2,3]){$('#e4'+'abcd'[i]).classList.add('show')}await sleep(600);$('#n5').classList.add('show');await sleep(900);if(!ok())return;
+ const win=1;
+ P.forEach((p,i)=>{const w=i===win;$('#p'+i).classList.add(w?'win':'lose');$('#e4'+'abcd'[i]).classList.add(w?'win':'lose');$('#e3'+'abcd'[i]).classList.add(w?'win':'lose')});
+ ['e0','e1','e2'].forEach(id=>$('#'+id).classList.add('win'));$('#n5').classList.add('win');
+ $('#finT').innerHTML='Answer: <tspan fill="var(--ok)">D ✓</tspan>';$('#finS').textContent='the model alone said B ✗';
+ cap('7 · Highest total wins: <b>D</b> — correct. Same model, no retraining, one small judge.');
+}
+$('#replay').onclick=play;play();
 </script></body></html>

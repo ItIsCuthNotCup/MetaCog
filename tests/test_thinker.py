@@ -438,6 +438,30 @@ def test_completions_streaming_text_deltas():
     assert gens[0].finished
 
 
+def test_stream_request_plain_json_fallback():
+    # Server ignores stream=true and answers a normal JSON completion body.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Answer: 391"}, "finish_reason": "stop"}]},
+        )
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat", stream=True)
+    gens = t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+    assert len(gens) == 1
+    assert gens[0].text == "Answer: 391"
+    assert gens[0].finished
+
+
+def test_empty_choices_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": []})
+
+    t = _thinker(handler, base_url="http://x", model="m", api="chat")
+    with pytest.raises(ThinkerError, match="no choices"):
+        t.generate("p", "", n=1, max_tokens=8, temperature=0.0)
+
+
 def test_stream_off_by_default_sends_no_stream_key():
     seen = {}
 

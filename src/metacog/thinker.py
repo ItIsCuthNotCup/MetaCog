@@ -112,13 +112,27 @@ class OpenAICompatThinker:
         return h
 
     def _read_stream(self, resp: httpx.Response, *, chat: bool) -> dict:
-        """Accumulate SSE chunks back into the non-streamed response shape."""
+        """Accumulate SSE chunks back into the non-streamed response shape.
+
+        Servers that ignore ``stream: true`` answer with a plain JSON body;
+        detect that (content-type or no ``data:`` lines) and parse it directly.
+        """
+        raw = resp.read().decode(resp.encoding or "utf-8", errors="replace")
+        if resp.headers.get("content-type", "").startswith("application/json"):
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ThinkerError(
+                    f"stream returned JSON content-type but invalid body: {e}"
+                ) from e
         parts: dict[int, dict] = {}
         usage = None
-        for line in resp.iter_lines():
+        saw_data = False
+        for line in raw.splitlines():
             if not line or line.startswith(":") or not line.startswith("data:"):
                 continue  # blanks and SSE comments/keepalives
             payload = line[len("data:") :].strip()
+            saw_data = True
             if payload == "[DONE]":
                 break
             try:
@@ -140,6 +154,13 @@ class OpenAICompatThinker:
                 acc["text"] += ch.get("text") or ""
                 if ch.get("finish_reason"):
                     acc["finish"] = ch["finish_reason"]
+        if not parts and not saw_data:
+            # Server ignored stream=true and sent a plain body without a
+            # JSON content-type; try to parse the raw text as a completion.
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ThinkerError("stream returned no SSE data and non-JSON body") from e
         choices = []
         for idx in sorted(parts):
             acc = parts[idx]
@@ -209,6 +230,8 @@ class OpenAICompatThinker:
         stop: list[str] | None,
     ) -> list[Generation]:
         choices = data.get("choices", [])
+        if not choices:
+            raise ThinkerError("no choices in response")
         total = (data.get("usage") or {}).get("completion_tokens")
         # Only an aggregate is reported; split it evenly across the returned choices.
         per_choice = total // len(choices) if total is not None and choices else 0

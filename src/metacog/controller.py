@@ -167,7 +167,12 @@ class MetaCog:
                 # Threshold on the raw noul when available: normalised probabilities
                 # degenerate to 1.0 for a single candidate.
                 score_vals = v.raw or v.probabilities
-                choice = max(range(len(cands)), key=lambda i: score_vals[i])
+                # Only finished candidates can carry a final answer — an
+                # unfinished split piece must never short-circuit the cascade.
+                choice = max(
+                    (i for i, c in enumerate(cands) if c.finished),
+                    key=lambda i: score_vals[i],
+                )
                 if score_vals[choice] >= cfg.cascade_confidence:
                     verdict = Verdict(
                         probabilities=v.probabilities,

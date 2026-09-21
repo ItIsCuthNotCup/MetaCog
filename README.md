@@ -35,6 +35,16 @@ where the first answer failed. Judge confidence was *not* a usable "send to a hu
 signal. Samples are modest — directional, not gospel. Full HumanEval table, provenance and
 limits in [docs/METHOD.md](docs/METHOD.md).
 
+## Live demo (any hosted model + Jev)
+
+`examples/live_demo.py` wraps any OpenAI-compatible endpoint
+(env `THINKER_URL` / `THINKER_MODEL` / `THINKER_KEY`, `PROBLEM_SET=hard`,
+`OUT=file.json`) in MetaCog with Jev, and records baseline vs candidates vs the
+judge's pick with full traces. `examples/render_demo.py 'runs/*.json' report.html
+"title"` renders a self-contained HTML report.
+
+<!-- LIVE_TABLE -->
+
 ## Install
 
 ```bash

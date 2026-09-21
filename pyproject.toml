@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "metacog"
-version = "0.1.0"
+version = "0.2.0"
 description = "Model-agnostic metacognition loop: parallel reasoning paths pruned by a System-One judge"
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,3 +35,7 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/live_demo.py" = ["E501"]
+"examples/render_demo.py" = ["E501"]

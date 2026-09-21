@@ -13,7 +13,7 @@ from .split import split_paths
 from .thinker import OpenAICompatThinker, Thinker, ThinkerError, TransformersThinker
 from .types import Candidate, Generation, Result, Round, Trace, Verdict
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "MetaCog",

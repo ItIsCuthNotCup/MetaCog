@@ -27,6 +27,17 @@ DEFAULT_SCORE_INSTRUCTIONS = (
     "substance, not the length or style."
 )
 
+ANSWER_PRIOR_INSTRUCTIONS = (
+    "`path` states only a proposed final answer to `problem`, with no reasoning. "
+    "Is that final answer correct?"
+)
+
+TRIAGE_INSTRUCTIONS = (
+    "`path` is empty. Judge `problem` itself: is this problem EASY enough that a "
+    "strong language model would almost certainly answer it correctly on its first "
+    "attempt?"
+)
+
 FINISHED_QUESTIONS = {
     "is_complete": (
         "Does `path` reach a definite final answer to `problem` (not just a plan or partial work)?"
@@ -80,7 +91,7 @@ class SystemOneJudge:
         model: str = "jev-latest",
         permutations: int | None = None,
         timeout: float = 60.0,
-        max_chars_per_path: int = 6000,
+        max_chars_per_path: int = 24000,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- `triage` (adaptive): Jev rates the bare problem first (offline: easy-score tracks
+  baseline accuracy at Spearman 0.72; GPQA 59% vs 88% for not-easy vs easy). Hard
+  problems fire the greedy root and level-0 branches concurrently instead of
+  waiting a serial stage.
+- `answer_prior`: Jev also judges each distinct bare final answer; that prior is
+  added to the text score (offline on saved disagreeing pools: 83→93 of 119 correct
+  picks, +14/−4). Judge default `max_chars_per_path` raised 6000→24000.
+- `mode="adaptive"` (experimental): the greedy answer is the root; the judge's
+  uncertainty `u = 1 − score` scales branching between `n_min`/`n_max`, and an
+  optional sketch level (`sketch_tokens`) is judged and pruned (`expand_max`,
+  `prune_margin`) so only kept sketches are expanded to full solutions. A greedy
+  path at `stop_confidence` returns immediately; sketches are never the answer.
+- adaptive `max_rounds`: repeat sketch → prune → expand levels (re-sketching from the best answer so far) until the judge scores a full answer ≥ `stop_confidence`.
+
 ## 0.2.0
 
 - `OpenAICompatThinker` accepts base URLs with or without a `/v1` suffix.

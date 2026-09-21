@@ -168,6 +168,224 @@ def test_cascade_only_considers_finished_candidates():
     assert rnd.candidates[rnd.kept[0]].finished
 
 
+def test_adaptive_stops_at_confident_greedy():
+    thinker = FakeThinker([[gen("greedy CORRECT answer", finished=True)]])
+    judge = FakeJudge(scores=[[0.97]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="adaptive", stop_confidence=0.95, split_generations=False),
+    )
+    result = mc.run("p")
+    assert result.answer == "greedy CORRECT answer"
+    assert result.finished
+    assert len(thinker.calls) == 1
+    assert thinker.calls[0]["temperature"] == 0.0
+    assert len(result.trace.rounds) == 1
+
+
+@pytest.mark.parametrize("g_score,n_br", [(0.9, 2), (0.1, 6)])
+def test_adaptive_branching_scales_with_impurity(g_score, n_br):
+    # u = 1 - g_score; n_br = round(n_min + u * (n_max - n_min)) with n_min=2, n_max=6.
+    thinker = FakeThinker(
+        [
+            [gen("greedy answer", finished=True)],
+            [gen(f"sampled {i}", finished=True) for i in range(n_br)],
+        ]
+    )
+    judge = FakeJudge(scores=[[g_score], [0.5] * (1 + n_br)])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="adaptive",
+            stop_confidence=0.95,
+            n_min=2,
+            n_max=6,
+            split_generations=False,
+        ),
+    )
+    mc.run("p")
+    assert len(thinker.calls) == 2
+    assert thinker.calls[1]["n"] == n_br
+
+
+def test_adaptive_sketch_prunes_and_expands():
+    from metacog.controller import SKETCH_JUDGE_INSTRUCTIONS
+
+    thinker = FakeThinker(
+        [
+            [gen("greedy answer", finished=True)],
+            [gen(f"sketch idea number {i} with a plan") for i in range(4)],
+            [gen("expanded CORRECT solution zero", finished=True)],
+            [gen("expanded solution one", finished=True)],
+        ]
+    )
+    # greedy 0.5 -> u = 0.5 -> n_br = round(2 + 0.5*4) = 4 sketches;
+    # k = round(1 + 0.5*2) = 2; prune_margin 0.25 keeps scores >= 0.9 - 0.25.
+    judge = FakeJudge(scores=[[0.5], [0.9, 0.8, 0.3, 0.2], [0.5, 0.9, 0.8]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="adaptive",
+            stop_confidence=0.95,
+            n_min=2,
+            n_max=6,
+            sketch_tokens=200,
+            expand_max=3,
+            prune_margin=0.25,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert len(thinker.calls) == 4  # greedy + sketches + 2 expands
+    # the sketches were judged with the sketch-specific instructions
+    sketch_judge_call = judge.calls[1]
+    assert sketch_judge_call["kind"] == "score"
+    assert sketch_judge_call["instructions"] == SKETCH_JUDGE_INSTRUCTIONS
+    # exactly 2 expansions, prompted with the kept sketches' text
+    expand_calls = thinker.calls[2:]
+    assert len(expand_calls) == 2
+    assert all(c["n"] == 1 for c in expand_calls)
+    assert "sketch idea number 0" in expand_calls[0]["problem"]
+    assert "sketch idea number 1" in expand_calls[1]["problem"]
+    # round 0 is the sketch level; sketches are never the final answer
+    rnd = result.trace.rounds[0]
+    assert all(c.source == "sketch" for c in rnd.candidates)
+    assert rnd.kept == [0, 1]
+    final = result.trace.rounds[-1].candidates[result.trace.rounds[-1].kept[0]]
+    assert final.finished
+    assert final.source in {"greedy", "expand"}
+    assert result.finished
+
+
+def test_adaptive_unfinished_greedy_never_stops_early():
+    thinker = FakeThinker(
+        [
+            [gen("greedy truncated", finished=False)],
+            [gen(f"sampled {i}", finished=True) for i in range(6)],
+        ]
+    )
+    # greedy scored 0.99 but unfinished -> no finished candidate to stop on
+    judge = FakeJudge(scores=[[0.99], [0.5] * 7])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="adaptive", stop_confidence=0.95, split_generations=False),
+    )
+    mc.run("p")
+    assert len(thinker.calls) == 2  # it branched anyway
+    assert thinker.calls[1]["n"] == 6  # u = 1 - 0.0 -> n_max
+
+
+def test_triage_easy_keeps_cascade():
+    thinker = FakeThinker([[gen("greedy CORRECT answer", finished=True)]])
+    judge = FakeJudge(scores=[[0.9], [0.97]])  # triage says easy; greedy clears stop
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="adaptive", triage=0.5, stop_confidence=0.95, split_generations=False),
+    )
+    result = mc.run("p")
+    assert result.answer == "greedy CORRECT answer"
+    assert len(thinker.calls) == 1
+    assert thinker.calls[0]["temperature"] == 0.0
+    assert result.trace.judge_calls == 2
+    assert result.trace.triage == 0.9
+
+
+def test_triage_hard_branches_concurrently():
+    branches = [
+        gen(f"branch {i} CORRECT" if i == 0 else f"branch {i}", finished=True) for i in range(5)
+    ]
+    thinker = FakeThinker(
+        [
+            # greedy root and level-0 branches race; order of calls is not fixed
+            [gen("greedy answer", finished=True)],
+            branches,
+        ]
+    )
+    # triage 0.2 (< 0.5) -> hard start; u = 0.8 -> n_br = round(2 + 0.8*4) = 5;
+    # greedy scored 0.6 (below stop), then the pool pick favours branch 0.
+    judge = FakeJudge(scores=[[0.2], [0.6], [0.1, 0.9, 0.1, 0.1, 0.1, 0.1]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="adaptive",
+            triage=0.5,
+            stop_confidence=0.95,
+            n_min=2,
+            n_max=6,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "branch 0 CORRECT"
+    ns = sorted((c["n"], c["temperature"]) for c in thinker.calls)
+    assert ns == [(1, 0.0), (5, 0.8)]
+    assert result.trace.triage == 0.2
+    assert result.trace.judge_calls == 1 + 1 + 6  # triage + root + pool
+
+
+def test_triage_off_by_default():
+    thinker = FakeThinker([[gen("greedy CORRECT answer", finished=True)]])
+    judge = FakeJudge(scores=[[0.97]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="adaptive", stop_confidence=0.95, split_generations=False),
+    )
+    result = mc.run("p")
+    assert result.trace.triage is None
+    assert judge.calls[0]["candidates"] != [""]
+
+
+def test_answer_prior_reranks():
+    from metacog.judge import ANSWER_PRIOR_INSTRUCTIONS
+
+    thinker = FakeThinker(
+        [
+            [
+                gen("long reasoning work Answer: 7", finished=True),
+                gen("other reasoning work Answer: 9", finished=True),
+            ]
+        ]
+    )
+    # second score() call is the prior over the two distinct bare answers
+    judge = FakeJudge(scores=[[0.6, 0.55], [0.1, 0.9]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=2,
+            split_generations=False,
+            answer_prior=0.5,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "other reasoning work Answer: 9"
+    prior_call = judge.calls[1]
+    assert prior_call["candidates"] == ["Final answer: 7", "Final answer: 9"]
+    assert prior_call["instructions"] == ANSWER_PRIOR_INSTRUCTIONS
+    assert result.trace.judge_calls == 4  # 2 candidates + 2 distinct answers
+
+
+def test_answer_prior_skipped_for_single_candidate():
+    thinker = FakeThinker([[gen("only path Answer: 3", finished=True)]])
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="best_of_n", n_paths=1, split_generations=False, answer_prior=0.5),
+    )
+    result = mc.run("p")
+    assert result.answer == "only path Answer: 3"
+    assert result.trace.judge_calls == 0
+
+
 def test_cascade_requires_greedy_anchor():
     with pytest.raises(ValueError, match="greedy_anchor"):
         MetaCog(FakeThinker([]), FakeJudge(), Config(cascade_confidence=0.9))
@@ -451,3 +669,41 @@ def test_verify_finished_records_assessment(strategy):
     assert rnd.assessment is not None
     assert set(rnd.assessment) == {"is_complete", "is_correct"}
     assert result.trace.judge_calls == (3 if strategy == "noul" else 2)
+
+
+def test_adaptive_max_rounds_iterates_until_confident():
+    from metacog.controller import RESKETCH_PROMPT
+
+    thinker = FakeThinker(
+        [
+            [gen("greedy answer 7", finished=True)],
+            [gen("sketch A"), gen("sketch B")],
+            [gen("expanded from A, answer 7", finished=True)],
+            [gen("sketch C"), gen("sketch D")],
+            [gen("expanded from C, answer 9", finished=True)],
+        ]
+    )
+    # greedy 0.9 -> u=0.1 -> 2 sketches, k=1; after level 1 the best full answer is
+    # still 0.6 -> u=0.4 -> 2 sketches again; level 2 reaches 0.97 -> stop.
+    judge = FakeJudge(scores=[[0.9], [0.8, 0.4], [0.6, 0.55], [0.7, 0.3], [0.6, 0.55, 0.97]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="adaptive",
+            stop_confidence=0.95,
+            sketch_tokens=200,
+            expand_max=3,
+            max_rounds=3,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "expanded from C, answer 9"
+    assert len(thinker.calls) == 5  # stopped after level 2 of 3
+    # the second sketch level branches from the best full answer so far
+    resketch = thinker.calls[3]["problem"]
+    assert resketch == RESKETCH_PROMPT.format(problem="p", answer="greedy answer 7")
+    # final pool contains greedy + both expansions, never a sketch
+    final = result.trace.rounds[-1]
+    assert [c.source for c in final.candidates] == ["greedy", "expand", "expand"]

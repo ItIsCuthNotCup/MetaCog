@@ -29,7 +29,9 @@ class Candidate(BaseModel):
 
     text: str
     finished: bool
-    source: Literal["sample", "split", "greedy"]
+    # sketch: short outline of an approach (adaptive mode, never a final answer);
+    # expand: full solution written by following a kept sketch.
+    source: Literal["sample", "split", "greedy", "sketch", "expand"]
     parent: int | None = None
 
 
@@ -49,6 +51,7 @@ class Trace(BaseModel):
     thinker_calls: int = 0
     judge_calls: int = 0
     thinker_tokens: int = 0
+    triage: float | None = None  # adaptive: Jev's easy-score for the bare problem
 
 
 class Result(BaseModel):

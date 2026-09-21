@@ -142,11 +142,15 @@ class MetaCog:
         )
         cands = self._expand(gens, "")
         verdict = self._verdict(problem, cands, trace)
-        ranked = sorted(range(len(cands)), key=lambda i: -verdict.probabilities[i])
+        # A finished candidate always outranks an unfinished one (a truncated sample
+        # or an abandoned split-off path has no final answer to commit to).
+        ranked = sorted(
+            range(len(cands)), key=lambda i: (not cands[i].finished, -verdict.probabilities[i])
+        )
         kept = ranked[: cfg.keep_top_k]
         rnd = Round(step=0, prefix="", candidates=cands, verdict=verdict, kept=kept)
         trace.rounds.append(rnd)
-        best = cands[verdict.choice]
+        best = cands[ranked[0]]
         if best.finished:
             self._verify(problem, best.text, rnd, trace)
         return Result(answer=best.text, finished=best.finished, trace=trace)

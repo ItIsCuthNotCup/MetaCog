@@ -19,6 +19,32 @@ def test_best_of_n_picks_correct_candidate(strategy):
 
 
 @pytest.mark.parametrize("strategy", ["noul", "choice"])
+def test_best_of_n_prefers_finished_over_higher_scored_unfinished(strategy):
+    # The judge scores the UNFINISHED candidate higher (it contains CORRECT); the
+    # finished candidate must still win — an unfinished path has no final answer.
+    thinker = FakeThinker(
+        [
+            [
+                gen("CORRECT but truncated mid-thought", finished=False),
+                gen("a complete final answer", finished=True),
+            ]
+        ]
+    )
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="best_of_n", n_paths=2, split_generations=False, strategy=strategy),
+    )
+    result = mc.run("p")
+    assert result.answer == "a complete final answer"
+    assert result.finished
+    rnd = result.trace.rounds[0]
+    assert rnd.kept[0] == 1
+    assert rnd.candidates[rnd.kept[0]].finished
+
+
+@pytest.mark.parametrize("strategy", ["noul", "choice"])
 def test_single_candidate_skips_judge(strategy):
     thinker = FakeThinker([[gen("only path", finished=True)]])
     judge = FakeJudge()

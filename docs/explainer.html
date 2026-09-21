@@ -61,7 +61,7 @@ button{background:#1c1c1e;color:#ddd;border:1px solid #333;border-radius:7px;pad
   <rect class="ico" x="314" y="110" width="28" height="28" rx="7"/><text x="328" y="130" text-anchor="middle" font-size="16" font-weight="700">?</text>
   <text x="354" y="121" font-size="14" font-weight="600">Question</text><text x="354" y="138" font-size="11" class="m">GPQA Diamond · chemistry</text>
   <text x="680" y="126" text-anchor="end" font-size="14" class="m">···</text>
-  <text x="314" y="163" font-size="11" class="m">Difficulty</text><text x="686" y="163" text-anchor="end" font-size="11" fill="var(--warn)">● hard</text>
+  <text x="314" y="163" font-size="11" class="m">Type</text><text x="686" y="163" text-anchor="end" font-size="11" class="m">multiple choice · A–D</text>
  </g>
 
  <!-- first answer -->
@@ -69,7 +69,7 @@ button{background:#1c1c1e;color:#ddd;border:1px solid #333;border-radius:7px;pad
   <rect class="box" x="330" y="200" width="340" height="98" rx="10"/>
   <rect class="hdr" x="331" y="201" width="338" height="46" rx="9"/>
   <rect class="ico" x="344" y="210" width="28" height="28" rx="7"/><text x="358" y="230" text-anchor="middle" font-size="14" font-weight="700">K</text>
-  <text x="384" y="221" font-size="14" font-weight="600">Model</text><text x="384" y="238" font-size="11" class="m">Kimi K2.5 · one answer, as usual</text>
+  <text x="384" y="221" font-size="14" font-weight="600">Model</text><text x="384" y="238" font-size="11" class="m">Kimi K2.5 · one thought path, as usual</text>
   <text x="650" y="226" text-anchor="end" font-size="14" class="m">···</text>
   <text x="344" y="264" font-size="11" class="m">Status</text><text x="656" y="264" text-anchor="end" font-size="11" fill="var(--ok)">● Done</text>
   <text x="344" y="286" font-size="11" class="m">Answer</text><text x="656" y="288" text-anchor="end" font-size="16" font-weight="800" fill="var(--bad)" id="a0" opacity="0" style="transition:.4s">B</text>
@@ -78,11 +78,11 @@ button{background:#1c1c1e;color:#ddd;border:1px solid #333;border-radius:7px;pad
  <!-- Jev central node (octagon) -->
  <g class="node" id="n2">
   <polygon class="box" points="478,335 522,335 545,358 545,386 522,409 478,409 455,386 455,358" fill="#161618"/>
-  <text x="500" y="366" text-anchor="middle" font-size="12" font-weight="700">Jev</text>
+  <text x="500" y="366" text-anchor="middle" font-size="12" font-weight="700">Jev ≥95%?</text>
   <text x="500" y="392" text-anchor="middle" font-size="12" font-weight="700" id="conf" fill="var(--warn)"></text>
  </g>
  <text x="560" y="360" font-size="11" class="m" id="stopLbl" opacity="0" style="transition:.4s">confident → stop</text>
- <text x="512" y="447" font-size="11" fill="var(--warn)" id="noLbl" opacity="0" style="transition:.4s">75% · not sure → branch</text>
+ <text x="512" y="447" font-size="11" fill="var(--warn)" id="noLbl" opacity="0" style="transition:.4s">75% → 3 more thought paths</text>
  <g class="node" id="nStop">
   <rect class="box" x="640" y="440" width="120" height="34" rx="8"/><text x="700" y="462" text-anchor="middle" font-size="11" class="m">Return answer</text>
  </g>
@@ -104,10 +104,10 @@ button{background:#1c1c1e;color:#ddd;border:1px solid #333;border-radius:7px;pad
 
 <script>
 // Real run: GPQA Diamond (Pinacol rearrangement). Thinker Kimi K2.5, judge Jev. Model alone: B (wrong). Correct: D.
-const P=[{x:200,ans:"B",ok:false,text:.75,prior:.45,lbl:"First answer",sub:"temperature 0"},
-         {x:400,ans:"D",ok:true,text:.75,prior:.62,lbl:"Path 2",sub:"sampled"},
-         {x:600,ans:"D",ok:true,text:.69,prior:.62,lbl:"Path 3",sub:"sampled"},
-         {x:800,ans:"B",ok:false,text:.65,prior:.45,lbl:"Path 4",sub:"sampled"}];
+const P=[{x:200,ans:"B",ok:false,text:.75,prior:.45,lbl:"Thought path 1",sub:"the first answer"},
+         {x:400,ans:"D",ok:true,text:.75,prior:.62,lbl:"Thought path 2",sub:"sampled"},
+         {x:600,ans:"D",ok:true,text:.69,prior:.62,lbl:"Thought path 3",sub:"sampled"},
+         {x:800,ans:"B",ok:false,text:.65,prior:.45,lbl:"Thought path 4",sub:"sampled"}];
 const W=.5;
 const PORTS=[[500,172],[500,200],[500,298],[500,335],[500,409],[500,470],[200,540],[400,540],[600,540],[800,540],[200,770],[400,770],[600,770],[800,770],[500,830]];
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -139,27 +139,27 @@ async function play(){
  $('#finT').textContent='Pick';$('#finS').textContent='highest total wins';$('#finR').textContent='';
  await sleep(300);
  show('n0');cap('A question comes in.');await sleep(1400);if(!ok())return;
- show('e0','pt0','pt1');await sleep(400);show('n1');cap('The model answers once — exactly as it would on its own.');await sleep(1400);if(!ok())return;
+ show('e0','pt0','pt1');await sleep(400);show('n1');cap('The model writes one thought path — exactly what it would answer on its own.');await sleep(1400);if(!ok())return;
  $('#a0').setAttribute('opacity',1);await sleep(1100);if(!ok())return;
- show('e1','pt2','pt3');await sleep(400);show('n2');cap('<b>Jev</b>, a separate small judge, reads the answer. If it\'s confident, we stop here — most easy questions do.');
+ show('e1','pt2','pt3');await sleep(400);show('n2');cap('<b>Jev</b>, a separate small judge, reads that thought path. If it\'s ≥95% sure it\'s right, we stop here — most easy questions do.');
  show('eStop','nStop');$('#stopLbl').setAttribute('opacity',1);await sleep(2300);if(!ok())return;
  $('#conf').textContent='75%';$('#n2').classList.add('warn');cap('Only 75% sure. Not enough.');await sleep(1500);if(!ok())return;
  $('#nStop').classList.add('lose');$('#eStop').classList.remove('show');$('#stopLbl').setAttribute('opacity',.3);
- $('#noLbl').setAttribute('opacity',1);show('e2','pt4','pt5');cap('Not sure → <b>branch</b>. The less sure Jev is, the more paths the model writes — all in parallel.');await sleep(900);if(!ok())return;
+ $('#noLbl').setAttribute('opacity',1);show('e2','pt4','pt5');cap('Not sure → <b>branch</b>. The less sure Jev is, the more thought paths the model writes (2–6), all in parallel. 75% sure → 3 more.');await sleep(900);if(!ok())return;
  for(const i of [0,1,2,3]){show('e3'+'abcd'[i],'pt'+(6+i));await sleep(140)}
  await sleep(400);P.forEach((p,i)=>setTimeout(()=>ok()&&show('p'+i),i*170));await sleep(1500);if(!ok())return;
- P.forEach((p,i)=>$('#pa'+i).setAttribute('opacity',1));cap('Four complete answers. They disagree: B, D, D, B.');await sleep(2000);if(!ok())return;
- cap('Jev reads each path <b>on its own</b> and scores the reasoning.');
+ P.forEach((p,i)=>$('#pa'+i).setAttribute('opacity',1));cap('Four complete thought paths, the first one included. They disagree: B, D, D, B.');await sleep(2000);if(!ok())return;
+ cap('Jev reads each thought path <b>on its own</b> and scores how right it looks.');
  P.forEach((p,i)=>{show('c1_'+i);$('#m1_'+i).setAttribute('width',144*p.text)});await sleep(2500);if(!ok())return;
  cap('Then a second look: Jev sees <b>only the bare answer</b>, no reasoning, and scores that too.');
  P.forEach((p,i)=>{show('c2_'+i);$('#m2_'+i).setAttribute('width',144*p.prior)});await sleep(2500);if(!ok())return;
- cap('Add them up — the tie between B and D breaks.');P.forEach((p,i)=>show('c3_'+i));await sleep(1500);if(!ok())return;
+ cap('Total = reasoning + ½ × bare answer. The tie between B and D breaks.');P.forEach((p,i)=>show('c3_'+i));await sleep(1500);if(!ok())return;
  for(const i of [0,1,2,3]){show('e4'+'abcd'[i],'pt'+(10+i))}show('pt14');await sleep(500);show('n5');await sleep(900);if(!ok())return;
  const win=1;
  P.forEach((p,i)=>{const w=i===win;['p'+i,'e3'+'abcd'[i],'e4'+'abcd'[i]].forEach(id=>$('#'+id).classList.add(w?'win':'lose'))});
  ['e0','e1','e2','n5'].forEach(id=>$('#'+id).classList.add('win'));
- $('#finT').textContent='Answer: D';$('#finS').textContent='path 2 · highest total';$('#finR').innerHTML='<tspan fill="var(--ok)">● correct</tspan>  <tspan fill="var(--mute)">· alone it said</tspan> <tspan fill="var(--bad)">B ✗</tspan>';
- cap('Highest total wins: <b>D</b> — correct. Same model, no retraining, one small judge.');
+ $('#finT').textContent='Answer: D';$('#finS').textContent='thought path 2 · highest total';$('#finR').innerHTML='<tspan fill="var(--ok)">● correct</tspan>  <tspan fill="var(--mute)">· alone it said</tspan> <tspan fill="var(--bad)">B ✗</tspan>';
+ cap('The full thought path with the highest total is returned: <b>D</b> — correct. Same model, no retraining, one small judge.');
 }
 $('#replay').onclick=play;play();
 </script></body></html>

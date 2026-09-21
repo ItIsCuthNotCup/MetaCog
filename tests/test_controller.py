@@ -254,6 +254,87 @@ def test_max_steps_exhaustion_returns_unfinished(strategy):
     assert len(result.trace.rounds) == 2
 
 
+def test_stepwise_finish_paths_expands_survivors_and_judges_full_thoughts():
+    prefix = "pathA more "
+    thinker = FakeThinker(
+        [
+            [gen("pathA "), gen("pathB ")],  # step 0, unfinished continuations
+            [gen("more "), gen("other ")],  # step 1 continuations of "pathA "
+            [gen("done CORRECT", finished=True), gen("still going")],  # tail, finished
+        ]
+    )
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="stepwise",
+            n_paths=2,
+            step_tokens=64,
+            max_steps=2,
+            max_tokens=2000,
+            finish_paths=True,
+            split_generations=False,
+            strategy="noul",
+        ),
+    )
+    result = mc.run("p")
+    assert len(result.trace.rounds) == 3
+    tail = result.trace.rounds[-1]
+    assert all(c.text.startswith(prefix) for c in tail.candidates)
+    # tail call used the full remaining budget, not step_tokens
+    assert thinker.calls[-1]["max_tokens"] == 2000 - len(prefix) // 4
+    assert result.finished
+    assert "CORRECT" in result.answer
+
+
+def test_stepwise_without_finish_paths_keeps_old_tail():
+    thinker = FakeThinker(
+        [
+            [gen("pathA "), gen("pathB ")],
+            [gen("more "), gen("other ")],
+        ]
+    )
+    judge = FakeJudge()
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="stepwise",
+            n_paths=2,
+            max_steps=2,
+            split_generations=False,
+            strategy="noul",
+        ),
+    )
+    result = mc.run("p")
+    assert len(result.trace.rounds) == 2
+    assert not result.finished
+    assert len(thinker.calls) == 2  # no tail call
+
+
+def test_stepwise_finished_beats_higher_scored_unfinished_mid_tree():
+    thinker = FakeThinker(
+        [[gen("unfinished but highly scored"), gen("finished CORRECT answer", finished=True)]]
+    )
+    judge = FakeJudge(scores=[[0.9, 0.4]])  # unfinished scores higher
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="stepwise",
+            n_paths=2,
+            max_steps=5,
+            split_generations=False,
+            strategy="noul",
+        ),
+    )
+    result = mc.run("p")
+    assert result.finished
+    assert result.answer == "finished CORRECT answer"
+    assert len(result.trace.rounds) == 1
+
+
 def test_more_than_26_candidates_truncated_for_choice():
     gens = [gen(f"candidate number {i} with enough text") for i in range(30)]
     thinker = FakeThinker([gens])

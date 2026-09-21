@@ -30,6 +30,9 @@ class Config(BaseModel):
     greedy_anchor: bool = False
     # best_of_n + greedy_anchor: accept the greedy path alone if the judge scores it >= this
     cascade_confidence: float | None = None
+    # stepwise: after the last step, expand each kept prefix into n_paths full
+    # completions and judge those
+    finish_paths: bool = False
     keep_top_k: int = 1  # beam width after judging
     step_tokens: int = 256  # stepwise: tokens per extension
     max_steps: int = 8
@@ -236,7 +239,12 @@ class MetaCog:
             if not cands:
                 break
             verdict = self._verdict(problem, cands, trace)
-            ranked = sorted(range(len(cands)), key=lambda i: -verdict.probabilities[i])
+            # Finished-first: a branch that reached a final answer outranks a
+            # higher-scored truncated one at every level.
+            ranked = sorted(
+                range(len(cands)),
+                key=lambda i: (not cands[i].finished, -verdict.probabilities[i]),
+            )
             kept = ranked[: cfg.keep_top_k]
             rnd = Round(
                 step=step,
@@ -246,7 +254,7 @@ class MetaCog:
                 kept=kept,
             )
             trace.rounds.append(rnd)
-            best_cand = cands[verdict.choice]
+            best_cand = cands[ranked[0]]
             if best_cand.finished:
                 self._verify(problem, best_cand.text, rnd, trace)
                 return Result(answer=best_cand.text, finished=True, trace=trace)
@@ -263,5 +271,47 @@ class MetaCog:
                 text = best_cand.text + gens[0].text
                 return Result(answer=text, finished=gens[0].finished, trace=trace)
             prefixes = [cands[i].text for i in kept]
+        if cfg.finish_paths and prefixes:
+            return self._finish_tail(problem, prefixes, trace)
         answer = best_cand.text if best_cand else ""
         return Result(answer=answer, finished=False, trace=trace)
+
+    def _finish_tail(self, problem: str, prefixes: list[str], trace: Trace) -> Result:
+        """Final level of the decision tree: expand each surviving prefix into
+        ``n_paths`` full completions and let the judge pick among those."""
+        cfg = self.config
+        cands: list[Candidate] = []
+        offset = 0
+        for prefix in prefixes:
+            gens = self._generate(
+                problem,
+                prefix,
+                n=cfg.n_paths,
+                max_tokens=max(1, cfg.max_tokens - _est_tokens(prefix)),
+                temperature=cfg.temperature,
+                trace=trace,
+            )
+            new = self._expand(gens, prefix)
+            for c in new:
+                if c.parent is not None:
+                    c.parent += offset
+            offset += len(gens)
+            cands.extend(new)
+        verdict = self._verdict(problem, cands, trace)
+        ranked = sorted(
+            range(len(cands)),
+            key=lambda i: (not cands[i].finished, -verdict.probabilities[i]),
+        )
+        kept = ranked[: cfg.keep_top_k]
+        rnd = Round(
+            step=trace.rounds[-1].step + 1 if trace.rounds else 0,
+            prefix="\n".join(prefixes),
+            candidates=cands,
+            verdict=verdict,
+            kept=kept,
+        )
+        trace.rounds.append(rnd)
+        best = cands[ranked[0]]
+        if best.finished:
+            self._verify(problem, best.text, rnd, trace)
+        return Result(answer=best.text, finished=best.finished, trace=trace)

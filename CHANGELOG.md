@@ -17,6 +17,10 @@
 - `Config.cascade_confidence` (requires `greedy_anchor`): scores the greedy path
   with a noul first and skips the remaining samples when it clears the threshold
   (measured ≥0.95 → 226/229 correct).
+- `Config.finish_paths` (stepwise): after the last branching step, each surviving
+  prefix is expanded into `n_paths` full completions and the judge decides among
+  those — a pruned decision tree ending on full thoughts. Stepwise ranking is now
+  finished-first at every level.
 - When a thinker endpoint rejects `n>1`, remaining samples are fetched
   concurrently (up to 8 workers) instead of strictly sequentially.
 - Live multi-model demo + self-contained HTML renderer in `examples/`

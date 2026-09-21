@@ -1,6 +1,8 @@
 """Live demo: wrap any OpenAI-compatible thinker in MetaCog with a Jev judge and dump full traces.
 
-Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, THINKER_STREAM, N_PATHS, CASCADE (0.95 default, 0 disables), PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
+Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, THINKER_STREAM, N_PATHS,
+MODE (best_of_n default | stepwise), STEP_TOKENS (384), MAX_STEPS (2), CASCADE (0.95 default,
+0 disables), PROBLEM_SET=hard|harder or PROBLEMS_FILE=path.jsonl, OUT (resumable).
 Render the JSON files with examples/render_demo.py.
 """
 
@@ -163,12 +165,23 @@ def main() -> None:
         stream=os.environ.get("THINKER_STREAM", "1") != "0",
     )
     judge = SystemOneJudge.jev()
-    mc = MetaCog(
-        thinker,
-        judge,
-        Config(
+    mode = os.environ.get("MODE", "best_of_n")
+    n_paths = int(os.environ.get("N_PATHS", "3"))
+    if mode == "stepwise":
+        cfg = Config(
+            mode="stepwise",
+            n_paths=n_paths,
+            step_tokens=int(os.environ.get("STEP_TOKENS", "384")),
+            max_steps=int(os.environ.get("MAX_STEPS", "2")),
+            keep_top_k=1,
+            max_tokens=max_tokens,
+            temperature=0.9,
+            finish_paths=True,  # final level expands survivors into full thoughts
+        )
+    else:
+        cfg = Config(
             mode="best_of_n",
-            n_paths=int(os.environ.get("N_PATHS", "3")),
+            n_paths=n_paths,
             max_tokens=max_tokens,
             temperature=0.9,
             greedy_anchor=True,  # candidate 0 IS the baseline: the judge can only gain
@@ -177,8 +190,8 @@ def main() -> None:
                 if os.environ.get("CASCADE", "0.95") not in ("", "0")
                 else None
             ),
-        ),
-    )
+        )
+    mc = MetaCog(thinker, judge, cfg)
     out = []
     if os.path.exists(out_path):  # resume a run interrupted by provider errors
         out = json.load(open(out_path))["rows"]
@@ -188,30 +201,48 @@ def main() -> None:
             continue
         t0 = time.time()
         try:
-            res = mc.run(problem)
+            if mode == "stepwise":
+                # no greedy anchor in stepwise: the baseline is a separate timed call
+                base_g = thinker.generate(problem, "", n=1, max_tokens=max_tokens, temperature=0.0)[
+                    0
+                ]
+                t1 = time.time()
+                res = mc.run(problem)
+            else:
+                base_g, t1 = None, t0
+                res = mc.run(problem)
         except ThinkerError as e:
             print(f"[{i + 1}/{len(PROBLEMS)}] skipped: {str(e)[:200]}", flush=True)
             continue
         t2 = time.time()
-        rnd = res.trace.rounds[0] if res.trace.rounds else None
-        # the greedy anchor candidate doubles as the baseline row (no separate call)
-        base = next(
-            (c for c in rnd.candidates if c.source == "greedy"),
-            rnd.candidates[0] if rnd and rnd.candidates else None,
-        )
-        row = {
-            "problem": problem,
-            "truth": truth,
-            "baseline": {
+        rnd = res.trace.rounds[-1] if res.trace.rounds else None  # final full-thought round
+        if base_g is not None:
+            baseline = {
+                "text": base_g.text,
+                "answer": final_answer(base_g.text, truth),
+                "correct": correct(base_g.text, truth),
+                "seconds": round(t1 - t0, 1),
+            }
+        else:
+            # the greedy anchor candidate doubles as the baseline row (no separate call)
+            base = next(
+                (c for c in rnd.candidates if c.source == "greedy"),
+                rnd.candidates[0] if rnd and rnd.candidates else None,
+            )
+            baseline = {
                 "text": base.text if base else res.answer,
                 "answer": final_answer(base.text if base else res.answer, truth),
                 "correct": correct(base.text if base else res.answer, truth),
                 "seconds": None,  # folded into the metacog call; no separate timing
-            },
+            }
+        row = {
+            "problem": problem,
+            "truth": truth,
+            "baseline": baseline,
             "metacog": {
                 "answer": final_answer(res.answer, truth),
                 "correct": correct(res.answer, truth),
-                "seconds": round(t2 - t0, 1),
+                "seconds": round(t2 - t1, 1),
                 "pick": rnd.kept[0] if rnd else 0,
                 "candidates": [
                     {
@@ -239,6 +270,11 @@ def main() -> None:
                 "thinker_tokens": res.trace.thinker_tokens,
             },
         }
+        if mode == "stepwise":
+            row["metacog"]["rounds"] = len(res.trace.rounds)
+            row["metacog"]["levels"] = [
+                {"n": len(r.candidates), "kept": r.kept} for r in res.trace.rounds
+            ]
         out.append(row)
         print(
             f"[{i + 1}/{len(PROBLEMS)}] base={row['baseline']['answer']} ({row['baseline']['correct']}) metacog={row['metacog']['answer']} ({row['metacog']['correct']}) truth={truth}",

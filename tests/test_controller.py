@@ -562,3 +562,41 @@ def test_verify_finished_records_assessment(strategy):
     assert rnd.assessment is not None
     assert set(rnd.assessment) == {"is_complete", "is_correct"}
     assert result.trace.judge_calls == (3 if strategy == "noul" else 2)
+
+
+def test_adaptive_max_rounds_iterates_until_confident():
+    from metacog.controller import RESKETCH_PROMPT
+
+    thinker = FakeThinker(
+        [
+            [gen("greedy answer 7", finished=True)],
+            [gen("sketch A"), gen("sketch B")],
+            [gen("expanded from A, answer 7", finished=True)],
+            [gen("sketch C"), gen("sketch D")],
+            [gen("expanded from C, answer 9", finished=True)],
+        ]
+    )
+    # greedy 0.9 -> u=0.1 -> 2 sketches, k=1; after level 1 the best full answer is
+    # still 0.6 -> u=0.4 -> 2 sketches again; level 2 reaches 0.97 -> stop.
+    judge = FakeJudge(scores=[[0.9], [0.8, 0.4], [0.6, 0.55], [0.7, 0.3], [0.6, 0.55, 0.97]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="adaptive",
+            stop_confidence=0.95,
+            sketch_tokens=200,
+            expand_max=3,
+            max_rounds=3,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "expanded from C, answer 9"
+    assert len(thinker.calls) == 5  # stopped after level 2 of 3
+    # the second sketch level branches from the best full answer so far
+    resketch = thinker.calls[3]["problem"]
+    assert resketch == RESKETCH_PROMPT.format(problem="p", answer="greedy answer 7")
+    # final pool contains greedy + both expansions, never a sketch
+    final = result.trace.rounds[-1]
+    assert [c.source for c in final.candidates] == ["greedy", "expand", "expand"]

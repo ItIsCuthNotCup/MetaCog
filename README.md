@@ -128,7 +128,7 @@ Two modes:
 |---|---|---|
 | `best_of_n` | sample `n_paths` full answers, judge picks one | cheapest; works with any chat endpoint |
 | `stepwise` | sample `n_paths` continuations of `step_tokens`, judge picks, extend, repeat | tighter steering; needs prefix continuation (vLLM `continue_final_message` or `/v1/completions`) |
-| `adaptive` | greedy answer is the root; judge uncertainty `u = 1 − score` sets the branching factor `n_min..n_max`; an optional sketch level is judged and pruned, and only kept sketches are expanded into full solutions | experimental |
+| `adaptive` | greedy answer is the root; judge uncertainty `u = 1 − score` sets the branching factor `n_min..n_max`; an optional sketch level is judged and pruned, and only kept sketches are expanded into full solutions; with `max_rounds > 1` the tree keeps branching from the best answer until the judge is confident | experimental |
 
 `adaptive` is opt-in and experimental — pending paired numbers. A greedy path scored at
 least `stop_confidence` (default 0.95) is returned immediately; otherwise `n_br =

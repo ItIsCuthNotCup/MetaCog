@@ -20,6 +20,11 @@ SKETCH_PROMPT = (
 EXPAND_PROMPT = (
     "{problem}\n\nSolve it by following this approach (fix it if it is flawed):\n{sketch}"
 )
+RESKETCH_PROMPT = (
+    "{problem}\n\nA previous attempt reached this answer (it may be wrong):\n{answer}\n\n"
+    "Do NOT solve this yet. In at most 150 words, outline a different approach or a fix "
+    "for the flaw in that attempt: the key idea, the main steps, and any pitfall. No final answer."
+)
 SKETCH_JUDGE_INSTRUCTIONS = (
     "The response is only an outline of an approach, not a full solution. Judge whether "
     "following this approach would lead to the correct final answer."
@@ -71,6 +76,10 @@ class Config(BaseModel):
     # dropped when its score is below best_sketch_score - prune_margin
     expand_max: int = 3
     prune_margin: float = 0.25
+    # after each level, if the judge's score for the best full solution is still
+    # below stop_confidence, open another level (branching from the best answer so
+    # far) — up to this many levels in total
+    max_rounds: int = 1
 
 
 class MetaCog:
@@ -177,8 +186,11 @@ class MetaCog:
             return self._adaptive(problem)
         return self._stepwise(problem)
 
-    def _pick(self, problem: str, cands: list[Candidate], step: int, trace: Trace) -> Result:
-        """Judge full candidates, finished-first, record the round, return the best."""
+    def _pick(
+        self, problem: str, cands: list[Candidate], step: int, trace: Trace
+    ) -> tuple[Result, float]:
+        """Judge full candidates, finished-first, record the round; return the best
+        and the judge's score for it (raw noul when available)."""
         cfg = self.config
         verdict = self._verdict(problem, cands, trace)
         ranked = sorted(
@@ -191,7 +203,8 @@ class MetaCog:
         best = cands[ranked[0]]
         if best.finished:
             self._verify(problem, best.text, rnd, trace)
-        return Result(answer=best.text, finished=best.finished, trace=trace)
+        score = (verdict.raw or verdict.probabilities)[ranked[0]] if best.finished else 0.0
+        return Result(answer=best.text, finished=best.finished, trace=trace), score
 
     def _adaptive(self, problem: str) -> Result:
         """Decision-tree style search: the greedy answer is the root; the judge's
@@ -217,52 +230,72 @@ class MetaCog:
             trace.rounds.append(rnd)
             self._verify(problem, root[choice].text, rnd, trace)
             return Result(answer=root[choice].text, finished=True, trace=trace)
-        u = 1.0 - g_score
-        n_br = max(1, round(cfg.n_min + u * (cfg.n_max - cfg.n_min)))
-        if cfg.sketch_tokens <= 0:
-            gens = self._generate(
-                problem,
-                "",
-                n=n_br,
-                max_tokens=cfg.max_tokens,
-                temperature=cfg.temperature,
-                trace=trace,
-            )
-            return self._pick(problem, root + self._expand(gens, ""), 0, trace)
-        # Sketch level: cheap outlines, judged and pruned before any is expanded.
-        sk_gens = self._generate(
-            SKETCH_PROMPT.format(problem=problem),
-            "",
-            n=n_br,
-            max_tokens=cfg.sketch_tokens,
-            temperature=cfg.temperature,
-            trace=trace,
-        )
-        sketches = [
-            Candidate(text=g.text, finished=False, source="sketch", parent=i)
-            for i, g in enumerate(sk_gens)
-        ]
-        sv = self.judge.score(
-            problem, [s.text for s in sketches], instructions=SKETCH_JUDGE_INSTRUCTIONS
-        )
-        trace.judge_calls += len(sketches)
-        s_vals = sv.raw or sv.probabilities
-        order = sorted(range(len(sketches)), key=lambda i: -s_vals[i])
-        k = max(1, round(1 + u * (cfg.expand_max - 1)))
-        kept = [i for i in order[:k] if s_vals[i] >= s_vals[order[0]] - cfg.prune_margin]
-        trace.rounds.append(Round(step=0, prefix="", candidates=sketches, verdict=sv, kept=kept))
         cands = list(root)
-        for i in kept:
-            gens = self._generate(
-                EXPAND_PROMPT.format(problem=problem, sketch=sketches[i].text),
-                "",
-                n=1,
-                max_tokens=cfg.max_tokens,
-                temperature=cfg.temperature,
-                trace=trace,
-            )
-            cands.extend(self._expand(gens, "", source="expand", parent=i))
-        return self._pick(problem, cands, 1, trace)
+        best_text = root[finished[0]].text if finished else None
+        score, step = g_score, 0
+        for level in range(max(1, cfg.max_rounds)):
+            u = 1.0 - score
+            n_br = max(1, round(cfg.n_min + u * (cfg.n_max - cfg.n_min)))
+            if cfg.sketch_tokens <= 0:
+                gens = self._generate(
+                    problem,
+                    "",
+                    n=n_br,
+                    max_tokens=cfg.max_tokens,
+                    temperature=cfg.temperature,
+                    trace=trace,
+                )
+                cands = cands + self._expand(gens, "")
+            else:
+                # Sketch level: cheap outlines, judged and pruned before any is expanded.
+                # Later levels branch from the best full answer so far.
+                if level == 0 or best_text is None:
+                    prompt = SKETCH_PROMPT.format(problem=problem)
+                else:
+                    prompt = RESKETCH_PROMPT.format(problem=problem, answer=best_text)
+                sk_gens = self._generate(
+                    prompt,
+                    "",
+                    n=n_br,
+                    max_tokens=cfg.sketch_tokens,
+                    temperature=cfg.temperature,
+                    trace=trace,
+                )
+                sketches = [
+                    Candidate(text=g.text, finished=False, source="sketch", parent=i)
+                    for i, g in enumerate(sk_gens)
+                ]
+                sv = self.judge.score(
+                    problem,
+                    [s.text for s in sketches],
+                    instructions=SKETCH_JUDGE_INSTRUCTIONS,
+                )
+                trace.judge_calls += len(sketches)
+                s_vals = sv.raw or sv.probabilities
+                order = sorted(range(len(sketches)), key=lambda i: -s_vals[i])
+                k = max(1, round(1 + u * (cfg.expand_max - 1)))
+                kept = [i for i in order[:k] if s_vals[i] >= s_vals[order[0]] - cfg.prune_margin]
+                trace.rounds.append(
+                    Round(step=step, prefix="", candidates=sketches, verdict=sv, kept=kept)
+                )
+                step += 1
+                for i in kept:
+                    gens = self._generate(
+                        EXPAND_PROMPT.format(problem=problem, sketch=sketches[i].text),
+                        "",
+                        n=1,
+                        max_tokens=cfg.max_tokens,
+                        temperature=cfg.temperature,
+                        trace=trace,
+                    )
+                    cands = cands + self._expand(gens, "", source="expand", parent=i)
+            result, score = self._pick(problem, cands, step, trace)
+            step += 1
+            if result.finished:
+                best_text = result.answer
+            if result.finished and score >= cfg.stop_confidence:
+                break
+        return result
 
     def _best_of_n(self, problem: str) -> Result:
         cfg, trace = self.config, Trace()

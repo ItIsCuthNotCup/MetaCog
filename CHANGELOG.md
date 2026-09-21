@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `mode="adaptive"` (experimental): the greedy answer is the root; the judge's
+- adaptive `max_rounds`: repeat sketch → prune → expand levels (re-sketching from the best answer so far) until the judge scores a full answer ≥ `stop_confidence`.
   uncertainty `u = 1 − score` scales branching between `n_min`/`n_max`, and an
   optional sketch level (`sketch_tokens`) is judged and pruned (`expand_max`,
   `prune_margin`) so only kept sketches are expanded to full solutions. A greedy

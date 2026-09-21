@@ -190,6 +190,7 @@ def main() -> None:
             n_max=int(os.environ.get("N_MAX", "6")),
             sketch_tokens=int(os.environ.get("SKETCH_TOKENS", "0")),
             expand_max=int(os.environ.get("EXPAND_MAX", "3")),
+            max_rounds=int(os.environ.get("MAX_ROUNDS", "1")),
         )
     else:
         cfg = Config(

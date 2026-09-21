@@ -140,6 +140,34 @@ def test_cascade_below_threshold_falls_through_to_full_pool():
     assert result.answer == "greedy answer"
 
 
+def test_cascade_only_considers_finished_candidates():
+    # Greedy expands into the full text plus split pieces; an unfinished split
+    # piece scoring above threshold must not win over the finished greedy text.
+    greedy = (
+        "The greedy approach computes the result step by step carefully here. "
+        "Alternatively, a second unfinished approach wanders off mid-thought."
+    )
+    thinker = FakeThinker([[gen(greedy, finished=True)], [gen("sampled A"), gen("sampled B")]])
+    judge = FakeJudge(scores=[[0.96, 0.99, 0.5]])  # unfinished piece scores highest
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            greedy_anchor=True,
+            cascade_confidence=0.95,
+            split_generations=True,
+        ),
+    )
+    result = mc.run("p")
+    assert len(thinker.calls) == 1  # no sampled generations
+    assert result.answer == greedy
+    assert result.finished
+    rnd = result.trace.rounds[0]
+    assert rnd.candidates[rnd.kept[0]].finished
+
+
 def test_cascade_requires_greedy_anchor():
     with pytest.raises(ValueError, match="greedy_anchor"):
         MetaCog(FakeThinker([]), FakeJudge(), Config(cascade_confidence=0.9))

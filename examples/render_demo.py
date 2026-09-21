@@ -17,6 +17,10 @@ def extract(text):
 
 
 def regrade(block, truth):
+    try:
+        float(truth)
+    except (TypeError, ValueError):
+        return
     a = extract(block["text"])
     block["answer"] = a
     block["correct"] = a is not None and abs(float(a) - float(truth)) < 1e-6

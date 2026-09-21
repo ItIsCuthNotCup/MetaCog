@@ -163,11 +163,13 @@ class MetaCog:
             ]
             total = sum(new_raw)
             probs = [p / total for p in new_raw] if total else [1.0 / len(new_raw)] * len(new_raw)
+            # probabilities/choice use the combined score; raw stays the text-only
+            # noul so confidence thresholds keep their calibrated meaning.
             return Verdict(
                 probabilities=probs,
                 choice=max(range(len(new_raw)), key=lambda i: new_raw[i]),
                 confidence=max(new_raw),
-                raw=new_raw,
+                raw=list(base),
             )
         judged = cands[:MAX_JUDGE_CANDIDATES]
         v = self.judge.choose(

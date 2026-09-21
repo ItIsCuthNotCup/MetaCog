@@ -6,7 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .answers import extract_answer
 from .judge import ANSWER_PRIOR_INSTRUCTIONS, FINISHED_QUESTIONS, TRIAGE_INSTRUCTIONS, Judge
@@ -32,6 +32,16 @@ SKETCH_JUDGE_INSTRUCTIONS = (
     "The response is only an outline of an approach, not a full solution. Judge whether "
     "following this approach would lead to the correct final answer."
 )
+DIVERSITY_HINTS = [
+    "Approach: before solving, list what could make a naive answer wrong, then solve carefully.",
+    "Approach: solve it, then independently verify the result a second way before committing.",
+    "Approach: if there are options, eliminate each wrong option explicitly; "
+    "otherwise work backwards from what the answer must satisfy.",
+    "Approach: identify the single key insight or formula first, state it, "
+    "then apply it step by step.",
+    "Approach: solve with a concrete small example or numeric check first, then generalise.",
+    "Approach: consider the most common mistake on this kind of problem and avoid it explicitly.",
+]
 
 
 def _est_tokens(text: str) -> int:
@@ -92,6 +102,13 @@ class Config(BaseModel):
     # None disables. Only applied when >1 candidate is judged (never to the cascade).
     answer_prior: float | None = None
     answer_extractor: Callable[[str], str | None] = extract_answer
+    # experimental: sample each of n branches with a different approach hint
+    # appended to the problem (hints cycle if n > len(hints)). None disables.
+    diversity_hints: list[str] | None = None
+    # experimental, adaptive only: when the level loop ends without a confident
+    # finished answer, generate one greedy path from this thinker and re-pick.
+    escalate_thinker: Thinker | None = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class MetaCog:
@@ -109,7 +126,7 @@ class MetaCog:
         gens,
         prefix: str,
         *,
-        source: Literal["sample", "greedy", "expand"] = "sample",
+        source: Literal["sample", "greedy", "expand", "escalate"] = "sample",
         parent: int | None = None,
     ) -> list[Candidate]:
         """Turn raw generations (continuations of ``prefix``) into candidates."""
@@ -202,6 +219,15 @@ class MetaCog:
         temperature: float,
         trace: Trace,
     ):
+        if self.config.diversity_hints and n > 1 and temperature > 0:
+            return self._generate_diverse(
+                problem,
+                prefix,
+                n=n,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                trace=trace,
+            )
         gens = self.thinker.generate(
             problem,
             prefix,
@@ -211,6 +237,36 @@ class MetaCog:
             stop=self.config.stop,
         )
         trace.thinker_calls += 1
+        trace.thinker_tokens += sum(g.tokens for g in gens)
+        return gens
+
+    def _generate_diverse(
+        self,
+        problem: str,
+        prefix: str,
+        *,
+        n: int,
+        max_tokens: int,
+        temperature: float,
+        trace: Trace,
+    ):
+        """n sampled branches, each prompted with a different approach hint."""
+        hints = self.config.diversity_hints or []
+
+        def gen_one(i: int):
+            return self.thinker.generate(
+                f"{problem}\n\n{hints[i % len(hints)]}",
+                prefix,
+                n=1,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=self.config.stop,
+            )
+
+        with ThreadPoolExecutor(min(n, 8)) as ex:
+            per = list(ex.map(gen_one, range(n)))
+        gens = [g for part in per for g in part]
+        trace.thinker_calls += n
         trace.thinker_tokens += sum(g.tokens for g in gens)
         return gens
 
@@ -396,6 +452,22 @@ class MetaCog:
                 best_text = result.answer
             if result.finished and score >= cfg.stop_confidence:
                 break
+        if cfg.escalate_thinker is not None and (
+            not result.finished or score < cfg.stop_confidence
+        ):
+            gens = cfg.escalate_thinker.generate(
+                problem,
+                "",
+                n=1,
+                max_tokens=cfg.max_tokens,
+                temperature=0.0,
+                stop=cfg.stop,
+            )
+            trace.thinker_calls += 1
+            trace.thinker_tokens += sum(g.tokens for g in gens)
+            trace.escalated = True
+            cands = cands + self._expand(gens, "", source="escalate")
+            result, _ = self._pick(problem, cands, step, trace)
         return result
 
     def _best_of_n(self, problem: str) -> Result:

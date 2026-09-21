@@ -69,6 +69,29 @@ never do worse than baseline for lack of the option — and the confidence casca
 skips sampling entirely when it's that confident: measured, a noul ≥ 0.95 is correct
 226/229 times.
 
+### Standard benchmarks, 10 hosted thinkers (Sep 2026, partial)
+
+Same loop on public benchmarks, 10 CommandCode-hosted thinkers in parallel, Jev judging,
+`greedy_anchor` + cascade on, 3 paths (5 on AIME), raw chat completions with no tools.
+Rows are pooled over models and paired (same model, same problem). Denominators are
+partial — the provider's usage caps stopped the runs — so these are not full benchmark
+scores; the comparison is baseline vs MetaCog on identical rows.
+
+| benchmark | rows | baseline | MetaCog | ceiling (any path) | fixed / lost | McNemar p |
+|---|---|---|---|---|---|---|
+| custom harder counting | 134 | 0.642 | **0.701** | 0.709 | 10 / 2 | 0.039 |
+| MATH-500 level 5 (integer) | 159 | 0.931 | **0.969** | 0.975 | 7 / 1 | 0.070 |
+| GPQA Diamond | 372 | 0.707 | **0.742** | 0.772 | 23 / 10 | 0.035 |
+| AIME 2024+2025 | 191 | 0.759 | **0.817** | 0.859 | 14 / 3 | 0.013 |
+| pooled | 856 | 0.750 | **0.794** | — | 54 / 16 | 6e-6 |
+
+Where the paths disagreed and at least one was right, Jev picked a correct one 224/245
+times. Two hypotheses were tested and *not* adopted: judging 256–2048-token prefixes and
+pruning early (worse than judging full text on 47 saved pools: 31–36 vs 38 correct), and a
+2-level decision tree with full thoughts at the leaves (`mode="stepwise"`,
+`finish_paths=True`) — on a MiniCPM pilot it tied best-of-N (12/20 vs 12/20, baseline 8)
+at +7 % tokens and 1.8× judge calls.
+
 ## Install
 
 ```bash

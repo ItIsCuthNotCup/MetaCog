@@ -186,7 +186,7 @@ def main() -> None:
             temperature=0.9,
             greedy_anchor=True,  # candidate 0 IS the baseline: the judge can only gain
             cascade_confidence=(
-                float(os.environ["CASCADE"])
+                float(os.environ.get("CASCADE", "0.95"))
                 if os.environ.get("CASCADE", "0.95") not in ("", "0")
                 else None
             ),

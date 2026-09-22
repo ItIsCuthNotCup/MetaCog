@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- docs: local-judge replay results vs Jev.
 - `LogitJudge`: a built-in open-weights judge — scores each path by reading
   P(yes) from a frozen model's next-token logits in one forward pass, no text
   generation (idea credited to SemIf). Backends: `LogitJudge.llama_cpp(gguf)`

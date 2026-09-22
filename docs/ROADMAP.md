@@ -32,6 +32,7 @@ exact McNemar p; plus time and token multipliers.
 | 3 | Thinker escalation: if Jev is still < 0.95 after branching, one path from a stronger model instead of more paths from the same one | generation | **tested live, no gain** (+3/−3, n=50; fired on 19/50 rows at 1.19× time) — opt-in via `ESCALATE_MODEL` |
 | 4 | Pairwise tie-break: Jev `choice` between the top-2 when totals are within 0.05 | picking | **tested offline, no gain** (all: 132 vs 133, +3/−4) — dropped |
 | 5 | Distil MetaCog picks back into the thinker (SFT/GRPO via Halo) | training | later; needs GPUs |
+| 6 | Open-weights local judge (`LogitJudge`: P(yes) from next-token logits, SemIf-style) | picking | **shipped** (v0.3.x, PR #8). Replay on 127 disagreeing pools: 68/127 vs Jev 72/127, +8/−12, p=0.50 — statistical tie, slightly weaker. Next: GPU/llama-server latency (≈2 min/4-path pool on CPU), shared-state batching, per-workload calibration |
 
 Dev-set baseline (213 disagreeing pools, ceiling 178): text-only pick 123,
 text + 0.5·prior 133 (+17/−7 vs text, p=0.06) — the prior is confirmed as the

@@ -239,6 +239,16 @@ judge = LogitJudge.llama_cpp("Qwen_Qwen3.5-4B-Q4_K_M.gguf")  # pip install -e ".
 mc = MetaCog(thinker, judge, Config())
 ```
 
+**Measured.** Offline replay on 127 saved pools (tuning split) where the thought
+paths disagree and both judges have scores: `LogitJudge` (Qwen3.5-4B Q4, CPU)
+picks the correct path 68/127 vs Jev 72/127 (ceiling 100 — at least one path
+correct). Head-to-head +8/−12, exact McNemar p=0.50: statistically a tie,
+slightly weaker, in line with SemIf's reported Jev-agreement gap. `answer_prior`
+gives no gain with the local judge (68→68) — keep it for Jev; answer-group
+voting helps it modestly (73/127). Latency ≈2 min per 4-path pool on 8 CPU
+cores vs seconds for Jev; use a GPU or llama-server for real use. Jev remains
+the default judge.
+
 ## Develop
 
 ```bash

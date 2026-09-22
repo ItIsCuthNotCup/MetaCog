@@ -132,6 +132,7 @@ class LogitJudge:
         """Local GGUF via llama-cpp-python (``pip install -e ".[local]"``)."""
         try:
             import llama_cpp
+            import numpy as np
         except ImportError as e:
             raise JudgeError("llama-cpp-python is not installed; pip install -e '.[local]'") from e
         try:
@@ -142,7 +143,7 @@ class LogitJudge:
             model_path=model_path,
             n_ctx=n_ctx,
             n_threads=n_threads,
-            logits_all=True,
+            logits_all=False,
             verbose=False,
             **kw,
         )
@@ -168,22 +169,24 @@ class LogitJudge:
         # literally "yes"/"no".
         thinking = {"chat"}
 
-        def parse(out: dict) -> dict[str, float]:
-            tops = out["choices"][0]["logprobs"]["top_logprobs"]
-            if isinstance(tops, list):
-                tops = tops[0] if tops else {}
-            return {k: float(v) for k, v in tops.items()}
+        def next_token_logprobs(prompt: str) -> dict[str, float]:
+            # Only the last position's logits are computed (logits_all=False), so
+            # memory stays at n_batch x vocab instead of n_ctx x vocab.
+            tokens = llama.tokenize(prompt.encode(), add_bos=False, special=True)
+            tokens = tokens[-(n_ctx - 1) :]
+            llama.reset()
+            llama.eval(tokens)
+            logits = np.ctypeslib.as_array(llama._ctx.get_logits(), shape=(llama.n_vocab(),))
+            logits = logits.astype(np.float64)
+            logprobs = logits - (np.log(np.sum(np.exp(logits - logits.max()))) + logits.max())
+            top = np.argpartition(-logprobs, top_logprobs)[:top_logprobs]
+            return {
+                llama.detokenize([int(i)]).decode(errors="ignore"): float(logprobs[i]) for i in top
+            }
 
         def backend(messages: list[dict]) -> dict[str, float]:
             suffix = "" if "chat" in thinking else "<think></think>\n\n"
-            result = parse(
-                llama.create_completion(
-                    render(messages) + suffix,
-                    max_tokens=1,
-                    temperature=0,
-                    logprobs=top_logprobs,
-                )
-            )
+            result = next_token_logprobs(render(messages) + suffix)
             top = max(result, key=result.get) if result else None
             if "chat" not in thinking or top in YES_TOKENS + NO_TOKENS:
                 return result

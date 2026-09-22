@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 eval = ["datasets>=2.19"]
 hf = ["transformers>=4.44", "torch>=2.2"]
+local = ["llama-cpp-python>=0.2.90"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]

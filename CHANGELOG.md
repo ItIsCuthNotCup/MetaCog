@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `LogitJudge`: a built-in open-weights judge — scores each path by reading
+  P(yes) from a frozen model's next-token logits in one forward pass, no text
+  generation (idea credited to SemIf). Backends: `LogitJudge.llama_cpp(gguf)`
+  (`pip install -e ".[local]"`) and `LogitJudge.openai_compat(url, model)` for
+  servers returning `top_logprobs`. MetaCog needs no Jev API key with it.
+
 ## 0.3.0
 
 - `mode="adaptive"` + `answer_prior=0.5` is now the default configuration —

@@ -48,6 +48,13 @@ FINISHED_QUESTIONS = {
 TYPESAFE_BASE_URL = "https://api.typesafe.ai"
 
 
+def truncate_path(text: str, max_chars: int) -> str:
+    """Keep the LAST ``max_chars`` chars; the most recent reasoning matters."""
+    if len(text) <= max_chars:
+        return text
+    return "…" + text[-max_chars:]
+
+
 class JudgeError(Exception):
     """Raised when the judge endpoint returns an HTTP error."""
 
@@ -127,9 +134,7 @@ class SystemOneJudge:
 
     def _truncate(self, text: str) -> str:
         """Keep the LAST ``max_chars_per_path`` chars; the most recent reasoning matters."""
-        if len(text) <= self.max_chars_per_path:
-            return text
-        return "…" + text[-self.max_chars_per_path :]
+        return truncate_path(text, self.max_chars_per_path)
 
     def _post(self, body: dict) -> dict:
         last_exc: Exception | None = None

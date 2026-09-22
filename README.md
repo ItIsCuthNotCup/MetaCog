@@ -224,6 +224,21 @@ Anything that speaks `POST /v1/systemone` (TypeSafe's schema):
 - **Reflex** — `uv run reflex-serve --model Qwen/Qwen3.5-4B --port 8008`, then
   `SystemOneJudge.reflex()`. MIT, Apache-2.0 weights, ~8 GB GPU.
 
+### Local judge (no API key)
+
+`LogitJudge` scores each candidate by reading P(yes) directly from a frozen open
+model's next-token logits — one forward pass per path, no text generation (idea
+credited to [SemIf](https://github.com/TheoLeeCJ/SemIf)):
+
+```python
+from metacog import LogitJudge, MetaCog, Config
+
+judge = LogitJudge.llama_cpp("Qwen_Qwen3.5-4B-Q4_K_M.gguf")  # pip install -e ".[local]"
+# or any OpenAI-compatible server that returns top_logprobs (vLLM, llama-server):
+# judge = LogitJudge.openai_compat("http://localhost:8000", model="qwen")
+mc = MetaCog(thinker, judge, Config())
+```
+
 ## Develop
 
 ```bash

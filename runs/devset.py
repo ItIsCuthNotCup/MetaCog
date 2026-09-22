@@ -16,6 +16,8 @@ prior = `prior`):
   group+tie: both
 
 Jev calls are cached in runs/devset_cache.json; no thinker calls are made.
+Env JUDGE=llama:<gguf path> replaces Jev with LogitJudge.llama_cpp and caches
+into runs/devset_cache_local.json instead.
 Usage: .venv/bin/python runs/devset.py [A|B|all]
 """
 
@@ -33,15 +35,21 @@ sys.path.insert(0, "examples")
 from live_demo import final_answer  # noqa: E402
 
 from metacog.judge import SystemOneJudge  # noqa: E402
+from metacog.local_judge import LogitJudge  # noqa: E402
 
-CACHE = "runs/devset_cache.json"
+_judge_env = os.environ.get("JUDGE", "jev")
+CACHE = (
+    "runs/devset_cache_local.json" if _judge_env.startswith("llama:") else "runs/devset_cache.json"
+)
 OLD = "runs/rejudge.json"
 TIE_MARGIN = 0.05
 PRIOR_W = 0.5
 PRIOR_INSTR = "`path` states only a proposed final answer to `problem`. Is it correct?"
 
+LOCAL = _judge_env.startswith("llama:")
 cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
-old = json.load(open(OLD)) if os.path.exists(OLD) else {}
+# rejudge.json holds Jev scores; never reuse them for a local judge.
+old = json.load(open(OLD)) if os.path.exists(OLD) and not LOCAL else {}
 
 
 def norm(a, truth):
@@ -85,7 +93,11 @@ def load_pools():
     return list(pools.values())
 
 
-judge = SystemOneJudge.jev()
+judge = (
+    LogitJudge.llama_cpp(_judge_env.split(":", 1)[1])
+    if _judge_env.startswith("llama:")
+    else SystemOneJudge.jev()
+)
 
 
 def ensure_scores(p):
@@ -201,13 +213,18 @@ if __name__ == "__main__":
     pools = load_pools()
     na = sum(p["split"] == "A" for p in pools)
     print(f"{len(pools)} pools: A={na} B={len(pools) - na}", file=sys.stderr)
-    with ThreadPoolExecutor(8) as ex:
-        for n, _ in enumerate(ex.map(ensure_scores, pools), 1):
-            if n % 20 == 0:
+    todo = pools if split == "all" else [p for p in pools if p["split"] == split]
+    # llama.cpp is single-threaded per model; concurrent calls corrupt its KV state.
+    with ThreadPoolExecutor(1 if LOCAL else 8) as ex:
+        for n, _ in enumerate(ex.map(ensure_scores, todo), 1):
+            if n % (1 if LOCAL else 20) == 0:
                 json.dump(cache, open(CACHE, "w"))
+            if LOCAL:
+                print(f"scored {n}/{len(todo)}", file=sys.stderr, flush=True)
         json.dump(cache, open(CACHE, "w"))
-        for _ in ex.map(ensure_tie, pools):
-            pass
+        if not LOCAL:
+            for _ in ex.map(ensure_tie, todo):
+                pass
     json.dump(cache, open(CACHE, "w"))
     for s in ["A", "B", "all"] if split == "all" else [split]:
         report(pools, s)

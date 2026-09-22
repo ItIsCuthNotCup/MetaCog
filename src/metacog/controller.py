@@ -51,7 +51,7 @@ def _est_tokens(text: str) -> int:
 
 
 class Config(BaseModel):
-    mode: Literal["best_of_n", "stepwise", "adaptive"] = "stepwise"
+    mode: Literal["best_of_n", "stepwise", "adaptive"] = "adaptive"
     # noul: one isolated "is this correct?" request per candidate (no cap);
     # choice: one-shot pick over all candidates (max 26).
     strategy: Literal["noul", "choice"] = "noul"
@@ -100,7 +100,7 @@ class Config(BaseModel):
     # weight of the judge's "answer prior": each candidate's noul score is raised by
     # answer_prior * P(its bare final answer is correct), judged without the reasoning.
     # None disables. Only applied when >1 candidate is judged (never to the cascade).
-    answer_prior: float | None = None
+    answer_prior: float | None = 0.5
     answer_extractor: Callable[[str], str | None] = extract_answer
     # experimental: sample each of n branches with a different approach hint
     # appended to the problem (hints cycle if n > len(hints)). None disables.

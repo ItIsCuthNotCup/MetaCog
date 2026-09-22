@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
+- `mode="adaptive"` + `answer_prior=0.5` is now the default configuration —
+  promoted on 180 paired live rows (GPQA Diamond 60 + AIME; 86.7 % vs 81.7 %
+  for the previous default, +11/−2, McNemar p=0.02, 0.89× wall time).
+  `diversity_hints` and `escalate_thinker` were tested and stay opt-in (no gain).
 - `triage` (adaptive): Jev rates the bare problem first (offline: easy-score tracks
   baseline accuracy at Spearman 0.72; GPQA 59% vs 88% for not-easy vs easy). Hard
   problems fire the greedy root and level-0 branches concurrently instead of
@@ -14,7 +18,11 @@
   optional sketch level (`sketch_tokens`) is judged and pruned (`expand_max`,
   `prune_margin`) so only kept sketches are expanded to full solutions. A greedy
   path at `stop_confidence` returns immediately; sketches are never the answer.
-- adaptive `max_rounds`: repeat sketch → prune → expand levels (re-sketching from the best answer so far) until the judge scores a full answer ≥ `stop_confidence`.
+- Experimental, opt-in: `diversity_hints` (per-branch approach prompts) and
+  `escalate_thinker` (adaptive: one greedy path from a second thinker when the
+  pool stays unconfident).
+- adaptive `max_rounds`: repeat sketch → prune → expand levels (re-sketching from
+  the best answer so far) until the judge scores a full answer ≥ `stop_confidence`.
 
 ## 0.2.0
 

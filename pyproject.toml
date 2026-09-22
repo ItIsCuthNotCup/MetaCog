@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "metacog"
-version = "0.2.0"
+version = "0.3.0"
 description = "Model-agnostic metacognition loop: parallel reasoning paths pruned by a System-One judge"
 readme = "README.md"
 license = { text = "MIT" }

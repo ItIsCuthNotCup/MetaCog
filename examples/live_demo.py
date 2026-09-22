@@ -1,10 +1,10 @@
 """Live demo: wrap any OpenAI-compatible thinker in MetaCog with a Jev judge and dump full traces.
 
 Env: THINKER_URL, THINKER_MODEL, THINKER_KEY, THINKER_MAX_TOKENS, THINKER_STREAM, N_PATHS,
-MODE (best_of_n default | stepwise | adaptive), STEP_TOKENS (384), MAX_STEPS (2),
+MODE (adaptive default | best_of_n | stepwise), STEP_TOKENS (384), MAX_STEPS (2),
 CASCADE (0.95 default, 0 disables; also stop_confidence for adaptive), N_MIN (2),
 N_MAX (6), SKETCH_TOKENS (0 = full-solution branches), EXPAND_MAX (3),
-ANSWER_PRIOR (unset = off; e.g. 0.5 adds Jev's bare-answer noul to each pick),
+ANSWER_PRIOR (0.5 default — Jev's bare-answer noul added to each pick; 0 disables),
 TRIAGE (unset = off; e.g. 0.5, adaptive only — hard problems branch concurrently),
 DIVERSITY=1 (sampled branches each get a different approach hint), ESCALATE_MODEL
 (adaptive only: a second thinker model for one greedy rescue when unconfident),
@@ -172,9 +172,13 @@ def main() -> None:
         stream=os.environ.get("THINKER_STREAM", "1") != "0",
     )
     judge = SystemOneJudge.jev()
-    mode = os.environ.get("MODE", "best_of_n")
+    mode = os.environ.get("MODE", "adaptive")
     n_paths = int(os.environ.get("N_PATHS", "3"))
-    answer_prior = float(os.environ["ANSWER_PRIOR"]) if os.environ.get("ANSWER_PRIOR") else None
+    answer_prior = (
+        float(os.environ.get("ANSWER_PRIOR", "0.5"))
+        if os.environ.get("ANSWER_PRIOR", "0.5") not in ("", "0")
+        else None
+    )
     diversity_hints = DIVERSITY_HINTS if os.environ.get("DIVERSITY") == "1" else None
     escalate_thinker = (
         OpenAICompatThinker(

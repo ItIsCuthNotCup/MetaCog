@@ -46,8 +46,10 @@ TIE_MARGIN = 0.05
 PRIOR_W = 0.5
 PRIOR_INSTR = "`path` states only a proposed final answer to `problem`. Is it correct?"
 
+LOCAL = _judge_env.startswith("llama:")
 cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
-old = json.load(open(OLD)) if os.path.exists(OLD) else {}
+# rejudge.json holds Jev scores; never reuse them for a local judge.
+old = json.load(open(OLD)) if os.path.exists(OLD) and not LOCAL else {}
 
 
 def norm(a, truth):
@@ -211,13 +213,18 @@ if __name__ == "__main__":
     pools = load_pools()
     na = sum(p["split"] == "A" for p in pools)
     print(f"{len(pools)} pools: A={na} B={len(pools) - na}", file=sys.stderr)
-    with ThreadPoolExecutor(8) as ex:
-        for n, _ in enumerate(ex.map(ensure_scores, pools), 1):
-            if n % 20 == 0:
+    todo = pools if split == "all" else [p for p in pools if p["split"] == split]
+    # llama.cpp is single-threaded per model; concurrent calls corrupt its KV state.
+    with ThreadPoolExecutor(1 if LOCAL else 8) as ex:
+        for n, _ in enumerate(ex.map(ensure_scores, todo), 1):
+            if n % (1 if LOCAL else 20) == 0:
                 json.dump(cache, open(CACHE, "w"))
+            if LOCAL:
+                print(f"scored {n}/{len(todo)}", file=sys.stderr, flush=True)
         json.dump(cache, open(CACHE, "w"))
-        for _ in ex.map(ensure_tie, pools):
-            pass
+        if not LOCAL:
+            for _ in ex.map(ensure_tie, todo):
+                pass
     json.dump(cache, open(CACHE, "w"))
     for s in ["A", "B", "all"] if split == "all" else [split]:
         report(pools, s)

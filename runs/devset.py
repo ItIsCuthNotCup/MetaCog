@@ -16,6 +16,8 @@ prior = `prior`):
   group+tie: both
 
 Jev calls are cached in runs/devset_cache.json; no thinker calls are made.
+Env JUDGE=llama:<gguf path> replaces Jev with LogitJudge.llama_cpp and caches
+into runs/devset_cache_local.json instead.
 Usage: .venv/bin/python runs/devset.py [A|B|all]
 """
 
@@ -33,8 +35,12 @@ sys.path.insert(0, "examples")
 from live_demo import final_answer  # noqa: E402
 
 from metacog.judge import SystemOneJudge  # noqa: E402
+from metacog.local_judge import LogitJudge  # noqa: E402
 
-CACHE = "runs/devset_cache.json"
+_judge_env = os.environ.get("JUDGE", "jev")
+CACHE = (
+    "runs/devset_cache_local.json" if _judge_env.startswith("llama:") else "runs/devset_cache.json"
+)
 OLD = "runs/rejudge.json"
 TIE_MARGIN = 0.05
 PRIOR_W = 0.5
@@ -85,7 +91,11 @@ def load_pools():
     return list(pools.values())
 
 
-judge = SystemOneJudge.jev()
+judge = (
+    LogitJudge.llama_cpp(_judge_env.split(":", 1)[1])
+    if _judge_env.startswith("llama:")
+    else SystemOneJudge.jev()
+)
 
 
 def ensure_scores(p):

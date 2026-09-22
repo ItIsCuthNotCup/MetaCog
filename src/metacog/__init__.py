@@ -9,6 +9,7 @@ from .judge import (
     JudgeError,
     SystemOneJudge,
 )
+from .local_judge import LogitJudge
 from .split import split_paths
 from .thinker import OpenAICompatThinker, Thinker, ThinkerError, TransformersThinker
 from .types import Candidate, Generation, Result, Round, Trace, Verdict
@@ -29,6 +30,7 @@ __all__ = [
     "OpenAICompatThinker",
     "TransformersThinker",
     "SystemOneJudge",
+    "LogitJudge",
     "JudgeError",
     "ThinkerError",
     "split_paths",

@@ -1,9 +1,10 @@
 """Build the locked evaluation sets committed under docs/eval/.
 
-- docs/eval/confirm_set.json: fresh problems — 60 GPQA Diamond + 40 AIME whose
-  sha1 does not appear in ANY saved runs/*_*.json row. Read once per promotion
-  decision; never tune on it. Stores benchmark/dataset-index/sha1 only (no
-  problem text — GPQA/AIME are not ours to redistribute).
+- docs/eval/confirm_set.json: fresh problems — up to 60 GPQA Diamond + 40 AIME
+  whose sha1 does not appear in ANY saved runs/*_*.json row. AIME had no unseen
+  problems (all 60 already ran), so the set is currently GPQA-only (60). Read
+  once per promotion decision; never tune on it. Stores benchmark/dataset-index/
+  sha1 only (no problem text — GPQA/AIME are not ours to redistribute).
 - docs/eval/quick_screen.json: the ~40-row first gate for generation-side
   ideas — rows from the v0.3 runs (adaptP_* = adaptive + answer_prior) where
   MetaCog was wrong or the winner's judge score was < 0.8, balanced across
@@ -55,6 +56,11 @@ def confirm_set(seen):
             if sha1(d["problem"]) not in seen
         ]
         take = CONFIRM_COUNTS[bench]
+        if len(fresh) < take:
+            print(
+                f"WARNING: {bench} requested {take} fresh problems but only "
+                f"{len(fresh)} are unseen (of {len(items)}) — confirm set is short"
+            )
         print(f"{bench}: {len(fresh)} unseen of {len(items)} -> take {min(take, len(fresh))}")
         out.extend(sorted(fresh, key=lambda x: x["sha1"])[:take])
     return out

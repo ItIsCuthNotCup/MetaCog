@@ -32,6 +32,7 @@ exact McNemar p; plus time and token multipliers.
 | 3 | Thinker escalation: if Jev is still < 0.95 after branching, one path from a stronger model instead of more paths from the same one | generation | **tested live, no gain** (+3/−3, n=50; fired on 19/50 rows at 1.19× time) — opt-in via `ESCALATE_MODEL` |
 | 4 | Pairwise tie-break: Jev `choice` between the top-2 when totals are within 0.05 | picking | **tested offline, no gain** (all: 132 vs 133, +3/−4) — dropped |
 | 5 | Distil MetaCog picks back into the thinker (SFT/GRPO via Halo) | training | later; needs GPUs |
+| 5b | Calibrated judge ensemble (logistic meta-ranker over Jev text, bare-answer, answer-frequency and local-judge scores; fit on split A, read once on split B, 250 disagreeing pools) | picking | **tested offline, no gain** — learned t+a weights reproduce v0.3's fixed 0.5 prior (B: 74 vs 73/98, +3/−2); adding answer frequency hurts held-out (70/98, +8/−11); local-judge fusion adds nothing in 5-fold CV on A (90 vs 90/152). Jev's text score is already reasonably calibrated (Brier 0.16 on B). Dropped — `runs/metarank.py` |
 | 6 | Open-weights local judge (`LogitJudge`: P(yes) from next-token logits, SemIf-style) | picking | **shipped** (v0.3.x, PR #8). Replay on 127 disagreeing pools: 68/127 vs Jev 72/127, +8/−12, p=0.50 — statistical tie, slightly weaker. Next: GPU/llama-server latency (≈2 min/4-path pool on CPU), shared-state batching, per-workload calibration |
 
 Dev-set baseline (213 disagreeing pools, ceiling 178): text-only pick 123,

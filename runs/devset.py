@@ -101,8 +101,10 @@ judge = (
 
 
 def ensure_scores(p):
-    """Fill text + prior scores (per candidate) into cache; reuse rejudge.json where possible."""
-    c = cache.setdefault(p["id"], {})
+    """Fill text + prior scores (per candidate); reuse rejudge.json where possible.
+    Builds a local entry — the main thread assigns it into `cache` so workers
+    never mutate the dict while it is being dumped."""
+    c = dict(cache.get(p["id"], {}))
     o = old.get(p["id"], {})
     if "text" not in c:
         if o.get("tail6k") and len(o["tail6k"]) == len(p["cands"]):
@@ -119,7 +121,7 @@ def ensure_scores(p):
             ).raw
             m = dict(zip(distinct, pv, strict=True))
             c["ans"] = [m[x["answer"]] for x in p["cands"]]
-    return p["id"]
+    return p["id"], c
 
 
 def totals(p):
@@ -129,7 +131,7 @@ def totals(p):
 
 def ensure_tie(p):
     """#4: pairwise Jev choice on the top-2 by total when they are within TIE_MARGIN."""
-    c = cache[p["id"]]
+    c = dict(cache[p["id"]])
     tot = totals(p)
     order = sorted(range(len(tot)), key=lambda i: -tot[i])
     i, j = order[0], order[1]
@@ -137,7 +139,7 @@ def ensure_tie(p):
     if tot[i] - tot[j] <= TIE_MARGIN and key not in c:
         v = judge.choose(p["problem"], [p["cands"][i]["text"], p["cands"][j]["text"]])
         c[key] = v.probabilities
-    return p["id"]
+    return p["id"], c
 
 
 # ---- pickers ---------------------------------------------------------------
@@ -216,15 +218,16 @@ if __name__ == "__main__":
     todo = pools if split == "all" else [p for p in pools if p["split"] == split]
     # llama.cpp is single-threaded per model; concurrent calls corrupt its KV state.
     with ThreadPoolExecutor(1 if LOCAL else 8) as ex:
-        for n, _ in enumerate(ex.map(ensure_scores, todo), 1):
+        for n, (pid, c) in enumerate(ex.map(ensure_scores, todo), 1):
+            cache[pid] = c
             if n % (1 if LOCAL else 20) == 0:
                 json.dump(cache, open(CACHE, "w"))
             if LOCAL:
                 print(f"scored {n}/{len(todo)}", file=sys.stderr, flush=True)
         json.dump(cache, open(CACHE, "w"))
         if not LOCAL:
-            for _ in ex.map(ensure_tie, todo):
-                pass
+            for pid, c in ex.map(ensure_tie, todo):
+                cache[pid] = c
     json.dump(cache, open(CACHE, "w"))
     for s in ["A", "B", "all"] if split == "all" else [split]:
         report(pools, s)

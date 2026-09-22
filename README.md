@@ -35,23 +35,25 @@ remains the default judge.
 
 ### Experiment ledger
 
-Every configuration tested vs the current MetaCog on the same problems (live
-paired rows: GPQA Diamond first 60 + AIME 60; DeepSeek V4 Flash, Kimi K2.5,
-GLM-5.3 Flash) plus the judging-side tests replayed offline on saved pools.
+Every configuration tested, paired on the same problems (live rows: GPQA
+Diamond first 60 + AIME 60; DeepSeek V4 Flash, Kimi K2.5, GLM-5.3 Flash) plus
+the judging-side tests replayed offline on saved pools. Live results are
+fixed / lost vs the **v0.2 default** (best-of-N + greedy anchor + cascade) unless
+stated otherwise; opt-in additions were also measured against the v0.3 default
+they sit on top of, and that is the number that decided their verdict.
 
-| idea | what it changes | rows | result vs current | verdict |
+| idea | what it changes | rows | result (fixed / lost) | verdict |
 |---|---|---|---|---|
-| answer prior | judge also scores each bare final answer, added to the path score | 180 (live, on adaptive) | +11 / −2, p=0.02 (offline: 83→93/119 picks) | **promoted — default** |
-| adaptive paths | branch 2–6 full answers sized by judge uncertainty | 263 | +15 / −8, p=0.21 | **promoted — default** |
-| adaptive + prior | both together | 180 | 86.7 % vs 81.7 %, p=0.02 | **promoted — the v0.3 default** |
-| answer prior alone | prior on top of best-of-N | 191 | +8 / −4, p=0.39 | folded into default |
+| adaptive + answer prior | branch 2–6 full paths sized by judge uncertainty; judge also scores each bare final answer | 180 | 86.7 % vs 81.7 %, +11 / −2, p=0.02 | **promoted — the v0.3 default** |
+| adaptive paths alone | the branching without the prior | 263 | +15 / −8, p=0.21 | folded into default |
+| answer prior alone | the prior on top of best-of-N (offline: 83→93/119 picks) | 191 | +8 / −4, p=0.39 | folded into default |
 | answer-group voting | sum scores per distinct answer, pick inside the winner | 213 pools (offline) | 130 vs 133 picks, +17/−20 | dropped |
 | pairwise tie-break | `choice` call between top-2 within 0.05 | 213 pools (offline) | 132 vs 133 picks, +3/−4 | dropped |
 | prefix judging / early pruning | judge 256–2048-token prefixes, prune early | 47 pools (offline) | worse: 31–36 vs 38 correct | dropped |
 | stepwise 2-level tree | continuations at the leaves instead of full answers | 20 (pilot) | tie: 12/20 vs 12/20 | kept as `mode="stepwise"`, not default |
 | local judge (LogitJudge, Qwen3.5-4B) | P(yes) from next-token logits, no API key | 127 pools (offline) | 68 vs Jev 72, +8/−12, p=0.50 | shipped, opt-in |
-| diversity hints | each extra path gets a different approach prompt | 69 | +4 / −0, p=0.12 | opt-in `diversity_hints` |
-| escalate thinker | a stronger model writes one path when still unsure | 50 | +5 / −1, p=0.22, 1.62× tokens | opt-in `escalate_thinker` |
+| diversity hints | each extra path gets a different approach prompt | 69 | +4 / −0 vs v0.2; **+2 / −3 vs v0.3** | opt-in `diversity_hints`, not promoted |
+| escalate thinker | a stronger model writes one path when still unsure | 50 | +5 / −1 vs v0.2; **+3 / −3 vs v0.3**, 1.19× time | opt-in `escalate_thinker`, not promoted |
 | triage | judge rates the bare problem; hard ones branch immediately | 205 | +12 / −5, p=0.14, 0.69× time | opt-in `triage` |
 | adaptive sketches | 800-token outlines, kept 1–3 expanded | 256 | +14 / −8, p=0.29, 1.09× time | opt-in `sketch_tokens` |
 | cheaper sketches | 500-token outlines, ≤2 expanded | 218 | +9 / −8, p=1.00 | dropped |

@@ -13,6 +13,60 @@ problem ──▶ thinker samples n paths ──▶ judge picks one ──▶ th
                     └─────────────────────────┘   (repeat until the winning path finishes)
 ```
 
+## Status (Sep 2026)
+
+The default pipeline is **adaptive**: greedy thought path → Jev confidence →
+branch 2–6 full thought paths sized by judge uncertainty → Jev scores full paths
+plus each distinct bare final answer (`answer_prior=0.5`) → pick. Measured live
+on 180 paired rows (GPQA Diamond + AIME, three hosted thinkers) it lifts the
+v0.2 default from 81.7 % to **86.7 %** (+11/−2, exact McNemar p=0.02) at 0.89×
+wall time and 1.39× thinker tokens; the thinker alone scores 76.7 %. Pooled over
+856 rows on 4 benchmarks, the earlier best-of-N configuration was already
+75.0 % → 79.4 % vs the model alone. A no-API-key local judge (`LogitJudge`,
+below) is shipped and statistically ties Jev (68 vs 72/127, p=0.50) — Jev
+remains the default judge.
+
+| | |
+|---|---|
+| ![Accuracy: baseline → MetaCog → ceiling](docs/charts/accuracy.svg) | ![Why MetaCog still misses](docs/charts/misses.svg) |
+| Ceiling = some path was right. Gap MetaCog→ceiling is what a better judge could recover; gap ceiling→100% needs more/better paths. | 'No path right' → generate more or more diverse paths. 'Jev picked wrong' → improve the judge. Judge errors are the minority everywhere. |
+| ![Cost vs one greedy answer](docs/charts/cost.svg) | ![Cascade: problems stopped after the greedy path](docs/charts/cascade.svg) |
+| Generations ≈ token cost. Time is higher than generations because greedy → samples → judge run in sequence; parallelising stages is the speed lever. | Share of problems where Jev was ≥0.95 on the greedy answer so no samples were made, and how often that answer was right. Raising this share (without losing accuracy) is the cost lever. |
+
+### Experiment ledger
+
+Every configuration tested vs the current MetaCog on the same problems (live
+paired rows: GPQA Diamond first 60 + AIME 60; DeepSeek V4 Flash, Kimi K2.5,
+GLM-5.3 Flash) plus the judging-side tests replayed offline on saved pools.
+
+| idea | what it changes | rows | result vs current | verdict |
+|---|---|---|---|---|
+| answer prior | judge also scores each bare final answer, added to the path score | 180 (live, on adaptive) | +11 / −2, p=0.02 (offline: 83→93/119 picks) | **promoted — default** |
+| adaptive paths | branch 2–6 full answers sized by judge uncertainty | 263 | +15 / −8, p=0.21 | **promoted — default** |
+| adaptive + prior | both together | 180 | 86.7 % vs 81.7 %, p=0.02 | **promoted — the v0.3 default** |
+| answer prior alone | prior on top of best-of-N | 191 | +8 / −4, p=0.39 | folded into default |
+| answer-group voting | sum scores per distinct answer, pick inside the winner | 213 pools (offline) | 130 vs 133 picks, +17/−20 | dropped |
+| pairwise tie-break | `choice` call between top-2 within 0.05 | 213 pools (offline) | 132 vs 133 picks, +3/−4 | dropped |
+| prefix judging / early pruning | judge 256–2048-token prefixes, prune early | 47 pools (offline) | worse: 31–36 vs 38 correct | dropped |
+| stepwise 2-level tree | continuations at the leaves instead of full answers | 20 (pilot) | tie: 12/20 vs 12/20 | kept as `mode="stepwise"`, not default |
+| local judge (LogitJudge, Qwen3.5-4B) | P(yes) from next-token logits, no API key | 127 pools (offline) | 68 vs Jev 72, +8/−12, p=0.50 | shipped, opt-in |
+| diversity hints | each extra path gets a different approach prompt | 69 | +4 / −0, p=0.12 | opt-in `diversity_hints` |
+| escalate thinker | a stronger model writes one path when still unsure | 50 | +5 / −1, p=0.22, 1.62× tokens | opt-in `escalate_thinker` |
+| triage | judge rates the bare problem; hard ones branch immediately | 205 | +12 / −5, p=0.14, 0.69× time | opt-in `triage` |
+| adaptive sketches | 800-token outlines, kept 1–3 expanded | 256 | +14 / −8, p=0.29, 1.09× time | opt-in `sketch_tokens` |
+| cheaper sketches | 500-token outlines, ≤2 expanded | 218 | +9 / −8, p=1.00 | dropped |
+| wider & earlier stop | stop at 0.90, branch up to 8 | 23 | +0 / −0 | dropped |
+| deep tree | prune sketches, re-branch up to 3 levels | 81 | +3 / −1, p=0.62, 1.51× time | dropped |
+
+### What limits further gains
+
+The misses chart shows the judge is near its ceiling: on most benchmarks only
+1–4 % of problems are lost to a wrong pick, while up to ~29 % have *no correct
+path at all* to pick. So the next gains are on the generation side — more or
+more-diversified thought paths — and on scheduling: wall time runs ~5× a single
+answer vs ~2.8× generations because greedy → samples → judge run in sequence,
+so parallelising those stages is the speed lever.
+
 ## Measured
 
 MiniCPM5-2B thinker, separate judge, oracle grading. Two task families, same pattern twice.
@@ -91,16 +145,6 @@ pruning early (worse than judging full text on 47 saved pools: 31–36 vs 38 cor
 2-level decision tree with full thoughts at the leaves (`mode="stepwise"`,
 `finish_paths=True`) — on a MiniCPM pilot it tied best-of-N (12/20 vs 12/20, baseline 8)
 at +7 % tokens and 1.8× judge calls.
-
-### v0.3: adaptive mode + answer prior is the default
-
-180 paired rows (DeepSeek-v4-flash, Kimi-K2.5, GLM-5.3-flash; GPQA Diamond 60 + AIME):
-the v0.2 config (best-of-N + greedy anchor + cascade) scored 81.7 %, **adaptive +
-`answer_prior=0.5` scored 86.7 %** (+11 fixed / −2 lost, exact McNemar p=0.02) at
-0.89× wall time and 1.39× thinker tokens; the thinker alone scored 76.7 %. Two
-tested additions did not earn promotion and stay opt-in: `diversity_hints`
-(+2/−3 vs adaptive+prior, n=69) and `escalate_thinker` (+3/−3, n=50; fired on
-19/50 rows at 1.19× time).
 
 ## Install
 

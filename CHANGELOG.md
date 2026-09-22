@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- docs: README status section with charts and experiment ledger.
 - docs: local-judge replay results vs Jev.
 - `LogitJudge`: a built-in open-weights judge — scores each path by reading
   P(yes) from a frozen model's next-token logits in one forward pass, no text

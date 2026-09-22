@@ -92,6 +92,16 @@ pruning early (worse than judging full text on 47 saved pools: 31–36 vs 38 cor
 `finish_paths=True`) — on a MiniCPM pilot it tied best-of-N (12/20 vs 12/20, baseline 8)
 at +7 % tokens and 1.8× judge calls.
 
+### v0.3: adaptive mode + answer prior is the default
+
+180 paired rows (DeepSeek-v4-flash, Kimi-K2.5, GLM-5.3-flash; GPQA Diamond 60 + AIME):
+the v0.2 config (best-of-N + greedy anchor + cascade) scored 81.7 %, **adaptive +
+`answer_prior=0.5` scored 86.7 %** (+11 fixed / −2 lost, exact McNemar p=0.02) at
+0.89× wall time and 1.39× thinker tokens; the thinker alone scored 76.7 %. Two
+tested additions did not earn promotion and stay opt-in: `diversity_hints`
+(+2/−3 vs adaptive+prior, n=69) and `escalate_thinker` (+3/−3, n=50; fired on
+19/50 rows at 1.19× time).
+
 ## Install
 
 ```bash
@@ -122,15 +132,17 @@ for r in result.trace.rounds:
     print(r.step, [f"{p:.2f}" for p in r.verdict.probabilities], "kept", r.kept)
 ```
 
-Two modes:
+Modes (`adaptive` is the default):
 
 | mode | what happens | when |
 |---|---|---|
+| `adaptive` | greedy answer is the root; judge uncertainty `u = 1 − score` sets the branching factor `n_min..n_max`; an optional sketch level is judged and pruned, and only kept sketches are expanded into full solutions; with `max_rounds > 1` the tree keeps branching from the best answer until the judge is confident | **default** — the measured winner (v0.3 numbers above) |
 | `best_of_n` | sample `n_paths` full answers, judge picks one | cheapest; works with any chat endpoint |
 | `stepwise` | sample `n_paths` continuations of `step_tokens`, judge picks, extend, repeat | tighter steering; needs prefix continuation (vLLM `continue_final_message` or `/v1/completions`) |
-| `adaptive` | greedy answer is the root; judge uncertainty `u = 1 − score` sets the branching factor `n_min..n_max`; an optional sketch level is judged and pruned, and only kept sketches are expanded into full solutions; with `max_rounds > 1` the tree keeps branching from the best answer until the judge is confident | experimental |
 
-`adaptive` is opt-in and experimental — pending paired numbers. A greedy path scored at
+The default pipeline: greedy thought path → Jev confidence → branch 2–6 thought paths
+sized by uncertainty (`n_min`..`n_max`) → Jev scores full paths plus each distinct bare
+final answer (`answer_prior=0.5`) → pick. A greedy path scored at
 least `stop_confidence` (default 0.95) is returned immediately; otherwise `n_br =
 round(n_min + u·(n_max − n_min))` branches open. With `sketch_tokens > 0` the branches
 are cheap outlines judged under `SKETCH_JUDGE_INSTRUCTIONS` and pruned to
@@ -147,9 +159,9 @@ thinker writes inside a single sample, and `commit_confidence=0.9` to stop branc
 the judge is sure (a cost knob — judge margins were *not* a usable abstention signal in the
 measured pool).
 
-Experimental: `answer_prior=w` (e.g. `0.5`) asks the judge to also score each distinct
-bare final answer (`Final answer: X`, no reasoning) and adds `w ×` that noul to each
-candidate's full-text score before picking — offline on saved disagreeing pools it
+`answer_prior=w` (default `0.5`; `None` disables) asks the judge to also score each
+distinct bare final answer (`Final answer: X`, no reasoning) and adds `w ×` that noul
+to each candidate's full-text score before picking — offline on saved disagreeing pools it
 lifted correct picks from 83 to 93 of 119 (+14/−4).
 
 CLI:

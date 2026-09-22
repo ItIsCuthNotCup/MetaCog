@@ -4,6 +4,12 @@ from conftest import FakeJudge, FakeThinker, gen
 from metacog import Config, MetaCog
 
 
+def test_defaults_are_adaptive_with_answer_prior():
+    cfg = Config()
+    assert cfg.mode == "adaptive"
+    assert cfg.answer_prior == 0.5
+
+
 @pytest.mark.parametrize("strategy", ["noul", "choice"])
 def test_best_of_n_picks_correct_candidate(strategy):
     thinker = FakeThinker([[gen("wrong answer"), gen("this is CORRECT and finished", True)]])

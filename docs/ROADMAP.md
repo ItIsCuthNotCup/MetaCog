@@ -1,8 +1,9 @@
 # Roadmap: next additions and how they are tested
 
-Status of the default: best-of-N + greedy anchor + Jev confidence cascade
-(v0.2). Measured winner not yet promoted: `answer_prior=0.5` (+ adaptive
-paths), ~+5 pts over the default on paired live rows, p≈0.07 at 125 rows.
+Status of the default (v0.3): `mode="adaptive"` + `answer_prior=0.5` — promoted
+on 180 paired rows (DeepSeek-v4-flash, Kimi-K2.5, GLM-5.3-flash; GPQA Diamond
+60 + AIME): 86.7 % vs 81.7 % for the v0.2 default (+11/−2, McNemar p=0.02),
+0.89× wall time, 1.39× thinker tokens; model alone 76.7 %.
 
 ## Test protocol (iterate fast without fooling ourselves)
 
@@ -26,9 +27,9 @@ exact McNemar p; plus time and token multipliers.
 
 | # | Idea | Side | Status |
 |---|------|------|--------|
-| 1 | Diversity prompts: each sampled thought path gets a different angle (eliminate options / check edge cases / work backwards) | generation | to run live |
+| 1 | Diversity prompts: each sampled thought path gets a different angle (eliminate options / check edge cases / work backwards) | generation | **tested live, no gain** (+2/−3 vs adaptive+prior, n=69, 0.89× tokens) — opt-in via `DIVERSITY=1` |
 | 2 | Answer-group voting: sum text+prior scores per distinct answer, pick inside the winning group | picking | **tested offline, no gain** (all: 130 vs 133 right, +17/−20) — dropped |
-| 3 | Thinker escalation: if Jev is still < 0.95 after branching, one path from a stronger model instead of more paths from the same one | generation | to run live |
+| 3 | Thinker escalation: if Jev is still < 0.95 after branching, one path from a stronger model instead of more paths from the same one | generation | **tested live, no gain** (+3/−3, n=50; fired on 19/50 rows at 1.19× time) — opt-in via `ESCALATE_MODEL` |
 | 4 | Pairwise tie-break: Jev `choice` between the top-2 when totals are within 0.05 | picking | **tested offline, no gain** (all: 132 vs 133, +3/−4) — dropped |
 | 5 | Distil MetaCog picks back into the thinker (SFT/GRPO via Halo) | training | later; needs GPUs |
 

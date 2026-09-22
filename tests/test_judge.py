@@ -186,6 +186,40 @@ def test_score_all_zero_is_uniform():
     assert v.confidence == 0.0
 
 
+def test_score_concurrent_posts_preserve_order():
+    import threading
+    import time
+
+    nouls = {"a": 0.1, "b": 0.7, "c": 0.3, "d": 0.9}
+    threads = set()
+    lock = threading.Lock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        with lock:
+            threads.add(threading.get_ident())
+        time.sleep(0.05)
+        return httpx.Response(
+            200,
+            json={
+                "model": "m",
+                "answers": {"is_correct": {"type": "noul", "noul": nouls[body["state"]["path"]]}},
+            },
+        )
+
+    judge = _judge(handler, base_url="http://localhost:8008", concurrency=4)
+    v = judge.score("p", ["a", "b", "c", "d"])
+    assert v.raw == [0.1, 0.7, 0.3, 0.9]
+    assert v.choice == 3
+    assert len(threads) >= 2
+
+    threads.clear()
+    judge = _judge(handler, base_url="http://localhost:8008", concurrency=1)
+    v = judge.score("p", ["a", "b", "c", "d"])
+    assert v.raw == [0.1, 0.7, 0.3, 0.9]
+    assert len(threads) == 1
+
+
 def test_assess_maps_noul_per_key():
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)

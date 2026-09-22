@@ -256,8 +256,16 @@ the thinker** — self-grading measured worse than no judge.
 
 ```bash
 metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge none        # baseline
-metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge reflex --mode best_of_n --n 6
+metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge reflex      # adaptive (v0.3) default
+metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge reflex --mode stepwise --n 6
+metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge local --judge-model Qwen3.5-4B.gguf
 ```
+
+Adaptive knobs pass straight through to `Config`: `--stop-confidence` (0.95),
+`--n-min`/`--n-max` (2/6), `--sketch-tokens` (0), `--expand-max` (3),
+`--max-rounds` (1), `--triage`, `--answer-prior` (0.5, `none` disables),
+`--greedy-anchor`, `--cascade-confidence`. `--judge local` takes a `.gguf` path
+(`llama_cpp`) or `--judge-url` + `--judge-model` (OpenAI-compatible `top_logprobs`).
 
 The harness runs model-generated code — use a container or VM. Always report the coverage
 ceiling alongside accuracy and never let the thinker grade itself.

@@ -3,6 +3,9 @@
 ## Unreleased
 
 - docs: README status section with charts and experiment ledger.
+- `SystemOneJudge.score` scores candidates concurrently (`concurrency`, default 8).
+- `metacog-eval` exposes adaptive mode and all v0.3 knobs; `--judge local`.
+- docs/eval: locked confirm set and quick-screen set.
 - docs: local-judge replay results vs Jev.
 - `LogitJudge`: a built-in open-weights judge — scores each path by reading
   P(yes) from a frozen model's next-token logits in one forward pass, no text

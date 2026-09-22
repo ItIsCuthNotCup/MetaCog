@@ -1,7 +1,64 @@
-from metacog.eval.humaneval import build_problem, extract_code, run_test
+from metacog.controller import Config
+from metacog.eval.humaneval import _parser, build_config, build_problem, extract_code, run_test
 
 PROMPT = 'def add(a, b):\n    """Add two numbers."""\n'
 ENTRY = "add"
+
+
+def _args(*extra):
+    args = _parser().parse_args(
+        ["humaneval", "--thinker-url", "http://x", "--thinker-model", "m", *extra]
+    )
+    args.answer_prior = None if args.answer_prior == "none" else float(args.answer_prior)
+    return args
+
+
+def test_build_config_defaults_match_config():
+    cfg, ref = build_config(_args()), Config()
+    assert cfg.mode == "adaptive"
+    for field in (
+        "stop_confidence",
+        "n_min",
+        "n_max",
+        "sketch_tokens",
+        "expand_max",
+        "max_rounds",
+        "triage",
+        "answer_prior",
+        "greedy_anchor",
+        "cascade_confidence",
+    ):
+        assert getattr(cfg, field) == getattr(ref, field), field
+
+
+def test_build_config_passes_flags_and_answer_prior_none():
+    cfg = build_config(
+        _args(
+            "--mode",
+            "stepwise",
+            "--stop-confidence",
+            "0.9",
+            "--n-min",
+            "3",
+            "--sketch-tokens",
+            "200",
+            "--triage",
+            "0.5",
+            "--answer-prior",
+            "none",
+            "--greedy-anchor",
+            "--cascade-confidence",
+            "0.8",
+        )
+    )
+    assert cfg.mode == "stepwise"
+    assert cfg.stop_confidence == 0.9
+    assert cfg.n_min == 3
+    assert cfg.sketch_tokens == 200
+    assert cfg.triage == 0.5
+    assert cfg.answer_prior is None
+    assert cfg.greedy_anchor is True
+    assert cfg.cascade_confidence == 0.8
 
 
 def test_extract_code_prefers_last_python_block():

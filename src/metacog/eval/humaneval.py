@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..controller import Config, MetaCog
 from ..judge import SystemOneJudge
+from ..local_judge import LogitJudge
 from ..thinker import OpenAICompatThinker
 from ..types import Trace
 
@@ -111,7 +112,52 @@ class _BaselineMetaCog:
         return Result(answer=gens[0].text, finished=gens[0].finished, trace=trace)
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_config(args: argparse.Namespace) -> Config:
+    """Map CLI args 1:1 onto Config fields."""
+    return Config(
+        mode=args.mode,
+        strategy=args.strategy,
+        n_paths=args.n_paths,
+        step_tokens=args.step_tokens,
+        max_tokens=args.max_tokens,
+        max_steps=args.max_steps,
+        temperature=args.temperature,
+        stop_confidence=args.stop_confidence,
+        n_min=args.n_min,
+        n_max=args.n_max,
+        sketch_tokens=args.sketch_tokens,
+        expand_max=args.expand_max,
+        max_rounds=args.max_rounds,
+        triage=args.triage,
+        answer_prior=args.answer_prior,
+        greedy_anchor=args.greedy_anchor,
+        cascade_confidence=args.cascade_confidence,
+    )
+
+
+def build_judge(args: argparse.Namespace):
+    """The judge named by --judge; 'local' is a GGUF path or an OpenAI-compat URL."""
+    if args.judge == "jev":
+        judge = SystemOneJudge.jev(model=args.judge_model or "jev-latest")
+        if args.judge_url:
+            judge.base_url = args.judge_url.rstrip("/")
+        return judge
+    if args.judge == "local":
+        if args.judge_model and args.judge_model.endswith(".gguf"):
+            return LogitJudge.llama_cpp(args.judge_model)
+        if args.judge_url and args.judge_model:
+            return LogitJudge.openai_compat(args.judge_url, model=args.judge_model)
+        raise SystemExit(
+            "--judge local needs --judge-model <gguf path> or "
+            "--judge-url <server> --judge-model <model id>"
+        )
+    return SystemOneJudge.reflex(
+        base_url=args.judge_url or "http://localhost:8008",
+        model=args.judge_model or "reflex-latest",
+    )
+
+
+def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="metacog-eval")
     sub = ap.add_subparsers(dest="cmd", required=True)
     h = sub.add_parser("humaneval", help="evaluate on HumanEval")
@@ -121,11 +167,25 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--thinker-api-key", default=None)
     h.add_argument("--prefix-mode", choices=["assistant", "prompt"], default="assistant")
     h.add_argument("--system-prompt", default=None)
-    h.add_argument("--judge", choices=["jev", "reflex", "none"], default="reflex")
+    h.add_argument("--judge", choices=["jev", "reflex", "local", "none"], default="reflex")
     h.add_argument("--judge-url", default=None)
     h.add_argument("--judge-model", default=None)
-    h.add_argument("--mode", choices=["best_of_n", "stepwise"], default="stepwise")
+    h.add_argument("--mode", choices=["adaptive", "best_of_n", "stepwise"], default="adaptive")
     h.add_argument("--strategy", choices=["noul", "choice"], default="noul")
+    h.add_argument("--stop-confidence", type=float, default=0.95)
+    h.add_argument("--n-min", type=int, default=2)
+    h.add_argument("--n-max", type=int, default=6)
+    h.add_argument("--sketch-tokens", type=int, default=0)
+    h.add_argument("--expand-max", type=int, default=3)
+    h.add_argument("--max-rounds", type=int, default=1)
+    h.add_argument("--triage", type=float, default=None)
+    h.add_argument(
+        "--answer-prior",
+        default=0.5,
+        help="weight of the bare-answer prior; the literal 'none' disables it",
+    )
+    h.add_argument("--greedy-anchor", action="store_true")
+    h.add_argument("--cascade-confidence", type=float, default=None)
     h.add_argument("--n", type=int, default=4, dest="n_paths")
     h.add_argument("--limit", type=int, default=None)
     h.add_argument("--data", default=None, help="local JSONL with HumanEval fields")
@@ -137,7 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--max-steps", type=int, default=8)
     h.add_argument("--temperature", type=float, default=0.8)
     h.add_argument("--test-timeout", type=int, default=10)
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    args.answer_prior = None if args.answer_prior == "none" else float(args.answer_prior)
 
     thinker = OpenAICompatThinker(
         base_url=args.thinker_url,
@@ -151,28 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.judge == "none":
         mc: MetaCog | _BaselineMetaCog = _BaselineMetaCog(thinker, args.max_tokens)
     else:
-        if args.judge == "jev":
-            judge = SystemOneJudge.jev(model=args.judge_model or "jev-latest")
-            if args.judge_url:
-                judge.base_url = args.judge_url.rstrip("/")
-        else:
-            judge = SystemOneJudge.reflex(
-                base_url=args.judge_url or "http://localhost:8008",
-                model=args.judge_model or "reflex-latest",
-            )
-        mc = MetaCog(
-            thinker,
-            judge,
-            Config(
-                mode=args.mode,
-                strategy=args.strategy,
-                n_paths=args.n_paths,
-                step_tokens=args.step_tokens,
-                max_tokens=args.max_tokens,
-                max_steps=args.max_steps,
-                temperature=args.temperature,
-            ),
-        )
+        judge = build_judge(args)
+        mc = MetaCog(thinker, judge, build_config(args))
 
     tasks = _load_tasks(args.data, args.limit)
     out_dir = os.path.dirname(args.out)

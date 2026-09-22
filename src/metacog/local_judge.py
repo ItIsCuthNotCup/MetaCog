@@ -21,7 +21,6 @@ from typing import Any
 import httpx
 
 from .judge import (
-    DEFAULT_CHOOSE_INSTRUCTIONS,
     DEFAULT_SCORE_INSTRUCTIONS,
     JudgeError,
     truncate_path,
@@ -224,10 +223,10 @@ class LogitJudge:
         *,
         instructions: str | None = None,
     ) -> Verdict:
-        # Isolation scoring, not a listwise prompt: same readout as score()
-        # with the choose instructions.
+        # Isolation scoring, not a listwise prompt: the choose instructions
+        # describe a `paths` list this readout never shows, so score() wording is used.
         return self.score(
-            problem, candidates, instructions=instructions or DEFAULT_CHOOSE_INSTRUCTIONS
+            problem, candidates, instructions=instructions or DEFAULT_SCORE_INSTRUCTIONS
         )
 
     def assess(

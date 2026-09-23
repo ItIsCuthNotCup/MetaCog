@@ -52,6 +52,7 @@ they sit on top of, and that is the number that decided their verdict.
 | prefix judging / early pruning | judge 256–2048-token prefixes, prune early | 47 pools (offline) | worse: 31–36 vs 38 correct | dropped |
 | stepwise 2-level tree | continuations at the leaves instead of full answers | 20 (pilot) | tie: 12/20 vs 12/20 | kept as `mode="stepwise"`, not default |
 | local judge (LogitJudge, Qwen3.5-4B) | P(yes) from next-token logits, no API key | 127 pools (offline) | 68 vs Jev 72, +8/−12, p=0.50 | shipped, opt-in |
+| calibrated judge ensemble | logistic meta-ranker over Jev text, bare-answer, answer-frequency and local-judge scores | 250 pools (offline; fit on A, read once on B) | no gain — learned weights reproduce the fixed 0.5 prior (B: 74 vs 73/98, +3/−2); answer frequency hurts held-out (70/98); local-judge fusion adds nothing (CV on A: 90 vs 90/152); Jev already calibrated (Brier 0.16) | dropped |
 | diversity hints | each extra path gets a different approach prompt | 69 | +4 / −0 vs v0.2; **+2 / −3 vs v0.3** | opt-in `diversity_hints`, not promoted |
 | escalate thinker | a stronger model writes one path when still unsure | 50 | +5 / −1 vs v0.2; **+3 / −3 vs v0.3**, 1.19× time | opt-in `escalate_thinker`, not promoted |
 | triage | judge rates the bare problem; hard ones branch immediately | 205 | +12 / −5, p=0.14, 0.69× time | opt-in `triage` |
@@ -256,8 +257,16 @@ the thinker** — self-grading measured worse than no judge.
 
 ```bash
 metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge none        # baseline
-metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge reflex --mode best_of_n --n 6
+metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge reflex      # adaptive (v0.3) default
+metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge reflex --mode stepwise --n 6
+metacog-eval humaneval --thinker-url http://localhost:8000 --thinker-model X --judge local --judge-model Qwen3.5-4B.gguf
 ```
+
+Adaptive knobs pass straight through to `Config`: `--stop-confidence` (0.95),
+`--n-min`/`--n-max` (2/6), `--sketch-tokens` (0), `--expand-max` (3),
+`--max-rounds` (1), `--triage`, `--answer-prior` (0.5, `none` disables),
+`--greedy-anchor`, `--cascade-confidence`. `--judge local` takes a `.gguf` path
+(`llama_cpp`) or `--judge-url` + `--judge-model` (OpenAI-compatible `top_logprobs`).
 
 The harness runs model-generated code — use a container or VM. Always report the coverage
 ceiling alongside accuracy and never let the thinker grade itself.

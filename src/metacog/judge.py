@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import string
+from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
 import httpx
@@ -99,6 +100,7 @@ class SystemOneJudge:
         permutations: int | None = None,
         timeout: float = 60.0,
         max_chars_per_path: int = 24000,
+        concurrency: int = 8,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -111,6 +113,7 @@ class SystemOneJudge:
         self.model = model
         self.permutations = permutations
         self.max_chars_per_path = max_chars_per_path
+        self.concurrency = concurrency
         self._client = client or httpx.Client(timeout=timeout)
 
     @classmethod
@@ -205,8 +208,8 @@ class SystemOneJudge:
         candidate, so the judge never sees the other paths). Returns a Verdict whose
         ``probabilities`` are the raw P(correct) values normalised to sum 1 (uniform
         if all zero); ``raw`` holds the unnormalised values."""
-        raw: list[float] = []
-        for cand in candidates:
+
+        def _score_one(cand: str) -> float:
             body: dict = {
                 "model": self.model,
                 "state": {"problem": problem, "path": self._truncate(cand)},
@@ -220,7 +223,14 @@ class SystemOneJudge:
             if self.permutations is not None:
                 body["permutations"] = self.permutations
             data = self._post(body)
-            raw.append(data["answers"]["is_correct"]["noul"])
+            return data["answers"]["is_correct"]["noul"]
+
+        if self.concurrency > 1 and len(candidates) > 1:
+            workers = min(self.concurrency, len(candidates))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                raw = list(pool.map(_score_one, candidates))
+        else:
+            raw = [_score_one(cand) for cand in candidates]
         total = sum(raw)
         probs = [p / total for p in raw] if total else [1.0 / len(raw)] * len(raw)
         choice = max(range(len(raw)), key=lambda i: raw[i]) if raw else 0

@@ -1,0 +1,302 @@
+[
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 133,
+  "sha1": "00ade77201103ff1582f2940ef4fbee59fc21a97"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 161,
+  "sha1": "016b34cb7f5d532e2fcb726670bc394b78c11c75"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 167,
+  "sha1": "01ad989b65fb024e88b98cdf94f547452ca1fbd9"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 137,
+  "sha1": "044e9c8026ca5f6b22aaabe03e6e8ae492b98458"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 140,
+  "sha1": "05700ea232fb8abce044a523ea3231d42bad15db"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 155,
+  "sha1": "0eadadc4218a05826c45bb85f85f524077646335"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 134,
+  "sha1": "0eb9efa8574ebef3f809653fe70d1c1551a77f4f"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 159,
+  "sha1": "0fa4c0b519e16ea5550bc866d7bed6ba1bddca26"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 156,
+  "sha1": "17454c12b1885b2c994ee150908c0e9b5db4b0b9"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 130,
+  "sha1": "19dd7a3767622c553fd28cc815db424d58ad01af"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 162,
+  "sha1": "1b8b2204d321f7bc90eb2a5500ea591c18664545"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 183,
+  "sha1": "1dfd0b0ff53cee2a0a67f6e44e4096b4bcba106f"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 165,
+  "sha1": "20691bc20ab1eb9978270abe1c2f67d99a9b08f7"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 174,
+  "sha1": "282110158af447255bd248e114ee8cd8d81beefa"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 152,
+  "sha1": "2b85128f5a3e8d79f8e1eef214a8bb40002714a5"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 187,
+  "sha1": "2bb3934c984b125152ba1bb68f106932dd801fb9"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 190,
+  "sha1": "2dfc9c98b16a9d1a2b1140cfb3d2dc8e284ebf4a"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 193,
+  "sha1": "3234884661675f3acb52782882b478591780e45d"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 142,
+  "sha1": "330c7bc99b5b32b7e66765aac73cfdc0985b9d07"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 170,
+  "sha1": "3568f96026876fbd9ba77c669c5a7bebe9722464"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 145,
+  "sha1": "399846ba6cb7b45da3b077740c2c3b1a63ad7086"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 151,
+  "sha1": "3abeec906d4c9133d81c73eb465a254efce247e9"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 132,
+  "sha1": "3ad1f221d846012f67aa6d2625c8714f4386a530"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 176,
+  "sha1": "42903768ecc844be4e8c742f0fdfb7ed622cfa27"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 153,
+  "sha1": "48d87186ab12cfe9b0109229426814dd79c00f05"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 158,
+  "sha1": "4bf6e3d5c9be76c4c4747a6f97e51ccb045b105c"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 148,
+  "sha1": "501bec1f19501c402b059abb1fb0ee1f7f929546"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 180,
+  "sha1": "50bfcf96877f14818ca8d67db35d68fa1e2158e2"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 119,
+  "sha1": "51cd8ffd65cc1481fc3ab139e8b0951460e294ed"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 177,
+  "sha1": "616f2a5ea646297722c7f64e987c6a6a254d15c4"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 157,
+  "sha1": "6e324fa9206fa2fccbea5de08332337d33977767"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 136,
+  "sha1": "77500e4f1356d664194a66828201bb167d1ba96e"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 175,
+  "sha1": "77e8ab0073ba0270cef5cf2ddfcaa70f78a76344"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 118,
+  "sha1": "847a16543c001bdd96db8fc45b99830ea5eae0a7"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 195,
+  "sha1": "84ce05790bfe0678acda816909f66ac07197aa63"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 116,
+  "sha1": "86240c27b93ebec2a1fdd7c48fe8a725864a29dd"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 172,
+  "sha1": "86553bed625bf6a7f2fa6e1d6a10615dfc1cd5a7"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 171,
+  "sha1": "870d86edb5938755ad0141eb770c8e87844d18b4"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 149,
+  "sha1": "888eeb3d9b9b474a087ac1a5876566cfffa26c00"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 146,
+  "sha1": "897647a1bddf364ed9cf61f1dc172287f78077d1"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 114,
+  "sha1": "8a807ccbef61e75a54691feb78449dfe37cbcd85"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 191,
+  "sha1": "8a99f211e68b3f26b2d660a921f25e52d62df22c"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 147,
+  "sha1": "8ade832aeaf6f78e3fdadfaad440c78790356640"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 154,
+  "sha1": "8cd78cf9bf96a58bbc38555da0da6e22227c7f98"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 138,
+  "sha1": "8f17c8ab633f8484a9647078498bec2b851e5943"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 150,
+  "sha1": "90cb0288f433805809370b0a1f4d3f4e51de5a99"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 124,
+  "sha1": "917e1d1775574245bdadd7d3a655604249437d17"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 173,
+  "sha1": "9262a5a7b6e83066943017df3cecc623cba0e124"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 144,
+  "sha1": "937eae3db1d1ea06a1a10fab103580b318300274"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 184,
+  "sha1": "9472bf9329a48076a8934e5269d0df0c6c4a4f8e"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 123,
+  "sha1": "989e7ab07471e5108b72614da7ea9f839e0c53f6"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 117,
+  "sha1": "993b3555b078b09f6124e54cd38002832e88d1b4"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 128,
+  "sha1": "9943782cee1c7b4171776762089759ef87362868"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 143,
+  "sha1": "999d08b8144ecf903adc12572bd1c5119fad4817"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 129,
+  "sha1": "9a800f6ddd0c19c79040de6c556009d8de766d6d"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 197,
+  "sha1": "9aed9f385f4bdc63f5360933187de0b6495f7ac3"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 163,
+  "sha1": "9d0a980e14dea47ac4d570a8e10ca3dbc377842b"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 139,
+  "sha1": "a317c2da0bd01e1ca9b04f617c1951f8fcdf7e9b"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 178,
+  "sha1": "a39f67a79ddb75eda5113330512ef511e6c9e088"
+ },
+ {
+  "benchmark": "gpqa_diamond",
+  "index": 179,
+  "sha1": "a44bac192b6ceb0be66f0613644cac2796c67e22"
+ }
+]

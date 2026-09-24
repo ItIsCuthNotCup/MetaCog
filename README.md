@@ -124,7 +124,7 @@ one forward pass per path, no text generated (idea credited to
 ```python
 from metacog import LogitJudge
 
-judge = LogitJudge.llama_cpp("Qwen_Qwen3.5-4B-Q4_K_M.gguf")           # in-process
+judge = LogitJudge.llama_cpp("Qwen_Qwen3.5-4B-Q4_K_M.gguf")  # in-process
 judge = LogitJudge.openai_compat("http://localhost:8000", model="qwen")  # vLLM / llama-server
 ```
 

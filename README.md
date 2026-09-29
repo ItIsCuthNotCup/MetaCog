@@ -89,6 +89,16 @@ Modes:
 | `adaptive` | above; optional sketch level and multi-round tree | **default** |
 | `best_of_n` | sample `n_paths` full answers, judge picks one | cheapest; any chat endpoint |
 | `stepwise` | sample `n_paths` continuations of `step_tokens`, judge picks, extend, repeat | tighter steering; needs prefix continuation (vLLM `continue_final_message` or `/v1/completions`) |
+| `race` | all paths stream at once; the judge scores partial text and the first stream ≥ `race_confidence` (0.8) wins, cancelling the losers mid-flight | lowest latency; needs a streaming `OpenAICompatThinker` and server parallelism |
+
+`race` is the low-latency variant: instead of generating N full answers and
+judging them, every path streams concurrently while the judge re-scores the
+partial text (~every `race_score_chars` of new output). The first stream to
+cross `race_confidence` wins and the rest are cancelled — so wall-clock is one
+generation, not two serial rounds, and losing paths stop paying tokens early.
+Two streams that finish on the same answer also end the race early. The thinker
+server must serve the N streams in parallel (e.g. llama-server `--parallel N`)
+or the win collapses to best-of-N timing.
 
 Opt-in knobs (all measured; none beat the default significantly — see the
 [ledger](docs/RESULTS.md#3-experiment-ledger)):

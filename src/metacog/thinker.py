@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol, runtime_checkable
@@ -10,6 +11,71 @@ from typing import Literal, Protocol, runtime_checkable
 import httpx
 
 from .types import Generation
+
+
+class StreamHandle:
+    """One in-flight streamed generation.
+
+    ``text`` grows as chunks arrive; poll it while ``done`` is False.
+    ``cancel()`` aborts the underlying HTTP stream (the server frees the slot
+    when the connection drops); a cancelled handle reports ``finished=False``.
+    ``wait()`` blocks until the stream ends — by finishing, being cancelled, or
+    erroring — after which ``result`` or ``error`` is set.
+    """
+
+    def __init__(self) -> None:
+        self._content: list[str] = []
+        self._reasoning: list[str] = []
+        self._lock = threading.Lock()
+        self._cancelled = threading.Event()
+        self._done = threading.Event()
+        self.finish_reason: str | None = None
+        self.tokens = 0
+        self.result: Generation | None = None
+        self.error: Exception | None = None
+
+    def _push(self, content: str, reasoning: str) -> None:
+        with self._lock:
+            if content:
+                self._content.append(content)
+            if reasoning:
+                self._reasoning.append(reasoning)
+
+    @property
+    def text(self) -> str:
+        with self._lock:
+            content = "".join(self._content)
+            reasoning = "".join(self._reasoning)
+        if reasoning:
+            return f"<think>\n{reasoning}\n</think>\n{content}"
+        return content
+
+    @property
+    def done(self) -> bool:
+        return self._done.is_set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._done.wait(timeout)
+
+    def _settle(
+        self,
+        *,
+        text: str,
+        finished: bool,
+        tokens: int,
+        error: Exception | None = None,
+    ) -> None:
+        self.error = error
+        if error is None:
+            self.result = Generation(text=text, finished=finished, tokens=tokens)
+        self._done.set()
 
 
 class ThinkerError(Exception):
@@ -431,6 +497,123 @@ class OpenAICompatThinker:
             max_tokens=max_tokens,
             temperature=temperature,
             stop=stop,
+        )
+
+    def generate_streaming(
+        self,
+        problem: str,
+        prefix: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        stop: list[str] | None = None,
+    ) -> StreamHandle:
+        """Launch one generation as a background SSE stream.
+
+        The returned handle's ``text`` grows as chunks arrive; the caller may
+        poll it and ``cancel()`` mid-flight — the server-side slot is freed when
+        the connection drops. Used by ``mode="race"`` so the judge can score
+        partial paths and kill the losers without waiting for everyone.
+        """
+        chat = self.api != "completions"
+        if chat:
+            body = self._chat_body(
+                problem,
+                prefix,
+                n=1,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=stop,
+            )
+            path = "/v1/chat/completions"
+        else:
+            body = {
+                "model": self.model,
+                "prompt": self._render(problem) + prefix,
+                "n": 1,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                **self.extra_body,
+            }
+            if stop:
+                body["stop"] = stop
+            path = "/v1/completions"
+        body = {
+            **body,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        handle = StreamHandle()
+        threading.Thread(
+            target=self._stream_run,
+            args=(path, body, handle, chat, stop, max_tokens),
+            daemon=True,
+        ).start()
+        return handle
+
+    def _stream_run(
+        self,
+        path: str,
+        body: dict,
+        handle: StreamHandle,
+        chat: bool,
+        stop: list[str] | None,
+        max_tokens: int,
+    ) -> None:
+        try:
+            with self._client.stream(
+                "POST",
+                f"{self.base_url}{path}",
+                json=body,
+                headers=self._headers(),
+            ) as resp:
+                if resp.status_code >= 400:
+                    resp.read()
+                    raise ThinkerError(f"{path} -> HTTP {resp.status_code}: {resp.text}")
+                for line in resp.iter_lines():
+                    if handle.cancelled:
+                        break
+                    if not line or line.startswith(":") or not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:") :].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(chunk, dict) and "error" in chunk and "choices" not in chunk:
+                        raise ThinkerError(f"stream chunk error: {chunk['error']}")
+                    if chunk.get("usage"):
+                        handle.tokens = int(chunk["usage"].get("completion_tokens") or 0)
+                    for ch in chunk.get("choices") or []:
+                        delta = ch.get("delta") or {}
+                        handle._push(
+                            delta.get("content") or ch.get("text") or "",
+                            (delta.get("reasoning_content") or delta.get("reasoning") or "")
+                            if self.include_reasoning
+                            else "",
+                        )
+                        if ch.get("finish_reason"):
+                            handle.finish_reason = ch["finish_reason"]
+        except Exception as e:  # noqa: BLE001 — surface on the handle, never kill the caller
+            handle._settle(text=handle.text, finished=False, tokens=handle.tokens, error=e)
+            return
+        # Stream ended: finished unless cancelled or truncated by max_tokens.
+        text = handle.text
+        finished = handle.finish_reason == "stop" and not handle.cancelled
+        tokens = handle.tokens
+        if tokens >= max_tokens:
+            finished = False
+        for s in stop or []:
+            if s in text:
+                text = text[: text.index(s)]
+                finished = finished or not handle.cancelled
+        handle._settle(
+            text=text,
+            finished=finished,
+            tokens=tokens or len(text) // 4,
+            error=None,
         )
 
 

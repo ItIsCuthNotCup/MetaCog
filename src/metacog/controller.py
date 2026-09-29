@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
@@ -51,7 +52,7 @@ def _est_tokens(text: str) -> int:
 
 
 class Config(BaseModel):
-    mode: Literal["best_of_n", "stepwise", "adaptive"] = "adaptive"
+    mode: Literal["best_of_n", "stepwise", "adaptive", "race"] = "adaptive"
     # noul: one isolated "is this correct?" request per candidate (no cap);
     # choice: one-shot pick over all candidates (max 26).
     strategy: Literal["noul", "choice"] = "noul"
@@ -108,6 +109,17 @@ class Config(BaseModel):
     # experimental, adaptive only: when the level loop ends without a confident
     # finished answer, generate one greedy path from this thinker and re-pick.
     escalate_thinker: Thinker | None = None
+    # -- race: every path streams at once; the judge scores partial text and the
+    #    first stream to cross race_confidence wins, cancelling the losers
+    #    mid-flight. Requires a streaming thinker (falls back to best_of_n).
+    race_confidence: float = 0.8
+    race_poll_seconds: float = 0.5
+    # re-score the streams when any path has grown by at least this many chars
+    # since the last scoring pass (~150 tokens)
+    race_score_chars: int = 600
+    # guard rail: cancel whatever is still running after this long and pick
+    # among what finished
+    race_max_seconds: float = 600.0
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
@@ -282,6 +294,8 @@ class MetaCog:
             return self._best_of_n(problem)
         if self.config.mode == "adaptive":
             return self._adaptive(problem)
+        if self.config.mode == "race":
+            return self._race(problem)
         return self._stepwise(problem)
 
     def _pick(
@@ -468,6 +482,106 @@ class MetaCog:
             trace.escalated = True
             cands = cands + self._expand(gens, "", source="escalate")
             result, _ = self._pick(problem, cands, step, trace)
+        return result
+
+    def _race(self, problem: str) -> Result:
+        """Every path streams at once; the judge scores the partial streams and
+        the first to cross ``race_confidence`` wins — the losers are cancelled
+        mid-flight instead of generating to completion. Two finished streams
+        landing on the same answer also end the race early. If nothing crosses
+        the bar, the finished paths are judged normally.
+        """
+        cfg, trace = self.config, Trace()
+        gen_stream = getattr(self.thinker, "generate_streaming", None)
+        if gen_stream is None:
+            return self._best_of_n(problem)
+        n = max(1, cfg.n_paths)
+        hints = cfg.diversity_hints or []
+        handles = []
+        for i in range(n):
+            temp = 0.0 if (cfg.greedy_anchor and i == 0) else cfg.temperature
+            prompt = f"{problem}\n\n{hints[i % len(hints)]}" if hints else problem
+            handles.append(
+                gen_stream(
+                    prompt,
+                    "",
+                    max_tokens=cfg.max_tokens,
+                    temperature=temp,
+                    stop=cfg.stop,
+                )
+            )
+        trace.thinker_calls += n
+
+        def answer_key(text: str) -> str:
+            if cfg.answer_extractor:
+                a = cfg.answer_extractor(text)
+                if a is not None:
+                    return a
+            return " ".join(text.lower().split())
+
+        winner: int | None = None
+        scored_len = [0] * n
+        deadline = time.monotonic() + cfg.race_max_seconds
+        while winner is None and not all(h.done for h in handles) and time.monotonic() < deadline:
+            texts = [h.text for h in handles]
+            if any(len(t) - scored_len[i] >= cfg.race_score_chars for i, t in enumerate(texts)):
+                scored_len = [len(t) for t in texts]
+                try:
+                    v = self.judge.score(problem, texts, instructions=cfg.judge_instructions)
+                    trace.judge_calls += n
+                except Exception:  # noqa: BLE001 — a missed poll is not fatal
+                    v = None
+                if v is not None:
+                    vals = v.raw or v.probabilities
+                    best_i = max(range(len(vals)), key=lambda i: vals[i])
+                    if vals[best_i] >= cfg.race_confidence:
+                        winner = best_i
+                        break
+            # early agreement: two streams that finished on the same answer
+            agree: dict[str, list[int]] = {}
+            for i, h in enumerate(handles):
+                if h.done and h.result is not None and h.result.finished:
+                    agree.setdefault(answer_key(h.result.text), []).append(i)
+            agreeing = max(agree.values(), key=len, default=[])
+            if len(agreeing) >= 2:
+                winner = agreeing[0]
+                break
+            time.sleep(cfg.race_poll_seconds)
+
+        if winner is None and time.monotonic() >= deadline:
+            for h in handles:
+                h.cancel()
+        if winner is not None:
+            for j, h in enumerate(handles):
+                if j != winner:
+                    h.cancel()
+        for h in handles:
+            h.wait()
+        trace.thinker_tokens += sum(h.tokens for h in handles)
+
+        cands = [
+            Candidate(
+                text=h.result.text if h.result is not None else h.text,
+                finished=bool(h.result and h.result.finished),
+                source="greedy" if (cfg.greedy_anchor and i == 0) else "sample",
+            )
+            for i, h in enumerate(handles)
+        ]
+        if winner is not None:
+            verdict = Verdict(
+                probabilities=[1.0 if i == winner else 0.0 for i in range(n)],
+                choice=winner,
+                confidence=cfg.race_confidence,
+            )
+            rnd = Round(step=0, prefix="", candidates=cands, verdict=verdict, kept=[winner])
+            trace.rounds.append(rnd)
+            best = cands[winner]
+            if best.finished:
+                self._verify(problem, best.text, rnd, trace)
+            # A winner that crossed the bar mid-stream still wins even if it
+            # ended truncated — the judge preferred it to everything else.
+            return Result(answer=best.text, finished=best.finished, trace=trace)
+        result, _ = self._pick(problem, cands, step=0, trace=trace)
         return result
 
     def _best_of_n(self, problem: str) -> Result:

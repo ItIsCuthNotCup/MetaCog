@@ -588,21 +588,12 @@ class MetaCog:
         winner: int | None = None
         scored_len = [0] * n
         deadline = time.monotonic() + cfg.race_max_seconds
-        while (
-            winner is None
-            and not all(h.done for h in handles)
-            and time.monotonic() < deadline
-        ):
+        while winner is None and not all(h.done for h in handles) and time.monotonic() < deadline:
             texts = [h.text for h in handles]
-            if any(
-                len(t) - scored_len[i] >= cfg.race_score_chars
-                for i, t in enumerate(texts)
-            ):
+            if any(len(t) - scored_len[i] >= cfg.race_score_chars for i, t in enumerate(texts)):
                 scored_len = [len(t) for t in texts]
                 try:
-                    v = self.judge.score(
-                        problem, texts, instructions=cfg.judge_instructions
-                    )
+                    v = self.judge.score(problem, texts, instructions=cfg.judge_instructions)
                     trace.judge_calls += n
                 except Exception:  # noqa: BLE001 — a missed poll is not fatal
                     v = None
@@ -694,11 +685,7 @@ class MetaCog:
                 # short-circuit the cascade — a reasoning-only path has no
                 # final answer to commit to.
                 choice = max(
-                    (
-                        i
-                        for i, c in enumerate(cands)
-                        if c.finished and has_answer(c.text)
-                    ),
+                    (i for i, c in enumerate(cands) if c.finished and has_answer(c.text)),
                     key=lambda i: score_vals[i],
                     default=-1,
                 )

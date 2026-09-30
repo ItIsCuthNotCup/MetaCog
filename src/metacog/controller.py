@@ -571,10 +571,21 @@ class MetaCog:
         result, _ = self._pick(problem, cands, step=0, trace=trace)
         return result
 
-    def _race_poll(self, problem: str, handles: list, trace: Trace) -> int | None:
+    def _race_poll(
+        self,
+        problem: str,
+        handles: list,
+        trace: Trace,
+        *,
+        cancel_on_deadline: bool = True,
+    ) -> int | None:
         """Watch the streamed paths, scoring partial text; return the index of a
         winner crossing ``race_confidence`` (or two finishing on the same
-        answer) and cancel the losers, or None when nothing clears the bar."""
+        answer) and cancel the losers, or None when nothing clears the bar.
+
+        With ``cancel_on_deadline=False`` the deadline only ends winner-polling:
+        unfinished streams run to natural completion instead of being killed,
+        so paths that would have answered correctly are not lost mid-thought."""
         cfg = self.config
         n = len(handles)
 
@@ -614,7 +625,7 @@ class MetaCog:
                 break
             time.sleep(cfg.race_poll_seconds)
 
-        if winner is None and time.monotonic() >= deadline:
+        if winner is None and time.monotonic() >= deadline and cancel_on_deadline:
             for h in handles:
                 h.cancel()
         if winner is not None:
@@ -627,7 +638,11 @@ class MetaCog:
         """Branch-time racing (``race_on_branch``): stream the sampled paths at
         once, cancel losers when one crosses the bar, return all generations.
         Unlike ``_race`` this does not auto-pick the winner — the pool is still
-        judged normally, only the generation gets faster and cheaper."""
+        judged normally, only the generation gets faster and cheaper. When no
+        stream wins before ``race_max_seconds``, polling stops but unfinished
+        streams run to completion rather than being cancelled: the deadline
+        bounds winner-polling, not generation, so paths that would finish
+        correctly still produce candidates."""
         cfg = self.config
         gen_stream = getattr(self.thinker, "generate_streaming", None)
         handles = [
@@ -641,7 +656,7 @@ class MetaCog:
             for _ in range(n_sampled)
         ]
         trace.thinker_calls += n_sampled
-        self._race_poll(problem, handles, trace)
+        self._race_poll(problem, handles, trace, cancel_on_deadline=False)
         for h in handles:
             h.wait()
         trace.thinker_tokens += sum(h.tokens for h in handles)

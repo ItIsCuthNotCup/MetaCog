@@ -277,6 +277,45 @@ def test_race_on_branch_streams_samples_and_cancels_losers():
     assert res.trace.thinker_calls == 4  # greedy + 3 streams
 
 
+def test_race_on_branch_deadline_lets_streams_finish():
+    # No winner before the deadline: unfinished streams are NOT cancelled —
+    # they complete naturally so finishable paths still produce candidates.
+    thinker = FakeStreamThinker(
+        [
+            chunks(30, "CORRECT but slow " * 10, delay=0.01),
+            chunks(30, "also slow wrong " * 10, delay=0.01),
+        ]
+    )
+    thinker.script = [[Generation(text="greedy truncated", finished=False)]]
+    # huge race_score_chars => no poll re-scores; the only score() call is the
+    # final verdict over [greedy, stream0, stream1]
+    judge = FakeJudge(scores=[[0.1, 0.9, 0.05]] * 10)
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=3,
+            greedy_anchor=True,
+            cascade_confidence=0.8,
+            race_on_branch=True,
+            race_confidence=0.99,
+            race_poll_seconds=0.005,
+            race_score_chars=10**9,
+            race_max_seconds=0.05,
+            split_generations=False,
+        ),
+    )
+
+    res = mc.run("problem")
+
+    assert not thinker.handles[0].cancelled
+    assert not thinker.handles[1].cancelled
+    assert all(h.result is not None and h.result.finished for h in thinker.handles)
+    assert "CORRECT but slow" in res.answer or "also slow wrong" in res.answer
+    assert res.finished
+
+
 def test_race_on_branch_without_streaming_falls_back_to_generate():
     thinker = FakeThinker(
         [

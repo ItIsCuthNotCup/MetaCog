@@ -1,6 +1,6 @@
 """metacog: a model-agnostic metacognition loop (thinker + System-One judge)."""
 
-from .controller import Config, MetaCog
+from .controller import Config, MetaCog, has_answer
 from .judge import (
     DEFAULT_CHOOSE_INSTRUCTIONS,
     DEFAULT_SCORE_INSTRUCTIONS,
@@ -25,6 +25,7 @@ __version__ = "0.3.0"
 __all__ = [
     "MetaCog",
     "Config",
+    "has_answer",
     "Result",
     "Trace",
     "Round",

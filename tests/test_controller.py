@@ -713,3 +713,120 @@ def test_adaptive_max_rounds_iterates_until_confident():
     # final pool contains greedy + both expansions, never a sketch
     final = result.trace.rounds[-1]
     assert [c.source for c in final.candidates] == ["greedy", "expand", "expand"]
+
+
+def test_has_answer_strips_think_blocks():
+    from metacog import has_answer
+
+    assert has_answer("the answer is 42")
+    assert has_answer("<think>reasoning</think>\nanswer 42")
+    assert not has_answer("<think>reasoning only</think>")
+    # unclosed trailing think = truncated mid-reasoning: no answer
+    assert not has_answer("<think>reasoning cut off")
+    assert has_answer("answer so far\n<think>more reasoning")
+    assert not has_answer("")
+
+
+@pytest.mark.parametrize("strategy", ["noul", "choice"])
+def test_best_of_n_prefers_answerable_over_higher_scored_think_only(strategy):
+    # The judge scores the think-only path highest; it still must not win —
+    # there is no final answer inside a pure reasoning block.
+    thinker = FakeThinker(
+        [
+            [
+                gen("<think>very confident but never answered</think>", finished=True),
+                gen("a complete final answer", finished=True),
+            ]
+        ]
+    )
+    judge = FakeJudge(scores=[[0.95, 0.05]] if strategy == "noul" else None)
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(mode="best_of_n", n_paths=2, split_generations=False, strategy=strategy),
+    )
+    result = mc.run("p")
+    assert result.answer == "a complete final answer"
+    assert result.finished
+
+
+def test_cascade_does_not_fire_on_think_only_greedy():
+    # Greedy finished but is pure reasoning and scores 0.99: it cannot
+    # short-circuit because there is no answer to ship — the branch must run.
+    thinker = FakeThinker(
+        [
+            [gen("<think>confident reasoning, no answer</think>", finished=True)],
+            [gen("sampled CORRECT answer", finished=True)],
+        ]
+    )
+    judge = FakeJudge(scores=[[0.99], [0.1, 0.9]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=2,
+            greedy_anchor=True,
+            cascade_confidence=0.8,
+            split_generations=False,
+        ),
+    )
+    result = mc.run("p")
+    assert result.answer == "sampled CORRECT answer"
+    # greedy + sampled call happened (no short-circuit)
+    assert len(thinker.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("greedy_score", "expected_n"),
+    [(0.7, 4), (0.2, 6)],
+)
+def test_branch_min_paths_scales_width_with_uncertainty(greedy_score, expected_n):
+    # cascade fails at these scores; width = round(2 + u * (7 - 2))
+    thinker = FakeThinker(
+        [
+            [gen("greedy not confident", finished=True)],
+            [gen(f"sample {i}", finished=True) for i in range(7)],
+        ]
+    )
+    judge = FakeJudge(scores=[[greedy_score], [0.5] * 8])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=8,
+            greedy_anchor=True,
+            cascade_confidence=0.8,
+            branch_min_paths=2,
+            split_generations=False,
+        ),
+    )
+    mc.run("p")
+    assert thinker.calls[1]["n"] == expected_n
+
+
+def test_branch_max_tokens_applies_to_samples_only():
+    thinker = FakeThinker(
+        [
+            [gen("greedy not confident", finished=True)],
+            [gen("sample answer", finished=True)],
+        ]
+    )
+    judge = FakeJudge(scores=[[0.3], [0.1, 0.9]])
+    mc = MetaCog(
+        thinker,
+        judge,
+        Config(
+            mode="best_of_n",
+            n_paths=2,
+            greedy_anchor=True,
+            cascade_confidence=0.8,
+            max_tokens=2048,
+            branch_max_tokens=4096,
+            split_generations=False,
+        ),
+    )
+    mc.run("p")
+    assert thinker.calls[0]["max_tokens"] == 2048
+    assert thinker.calls[1]["max_tokens"] == 4096

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +14,7 @@ from .answers import extract_answer
 from .judge import ANSWER_PRIOR_INSTRUCTIONS, FINISHED_QUESTIONS, TRIAGE_INSTRUCTIONS, Judge
 from .split import split_paths
 from .thinker import Thinker
-from .types import Candidate, Result, Round, Trace, Verdict
+from .types import Candidate, Generation, Result, Round, Trace, Verdict
 
 MAX_JUDGE_CANDIDATES = 26
 
@@ -49,6 +50,19 @@ def _est_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token). We do not ship a tokenizer, so the
     stepwise token cap is approximate; treat ``max_tokens`` as a soft bound."""
     return len(text) // 4
+
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.S)
+_TRAILING_THINK_RE = re.compile(r"<think>.*", re.S)
+
+
+def has_answer(text: str) -> bool:
+    """True when the text carries content outside ``<think>`` reasoning blocks.
+
+    A path that is nothing but reasoning — finished or truncated mid-think —
+    has no final answer to commit to, so it must never win over a candidate
+    that actually answered."""
+    return bool(_TRAILING_THINK_RE.sub("", _THINK_BLOCK_RE.sub("", text)).strip())
 
 
 class Config(BaseModel):
@@ -120,6 +134,17 @@ class Config(BaseModel):
     # guard rail: cancel whatever is still running after this long and pick
     # among what finished
     race_max_seconds: float = 600.0
+    # -- best_of_n branch options (applied only after the cascade fails) --------
+    # stream the sampled paths race-style: judge polls partials, first to
+    # race_confidence wins and losers are cancelled mid-flight. The winner is
+    # still judged among the pool (no auto-pick) — only speed changes.
+    race_on_branch: bool = False
+    # adaptive path width: scale the sampled count by the greedy uncertainty
+    # u = 1 - greedy_score -> n_sampled = round(this + u * (n_paths-1 - this)).
+    # None = always n_paths - 1. Requires cascade_confidence (uses its score).
+    branch_min_paths: int | None = None
+    # sampled (proven-hard) paths may think longer than the greedy budget
+    branch_max_tokens: int | None = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
@@ -301,13 +326,18 @@ class MetaCog:
     def _pick(
         self, problem: str, cands: list[Candidate], step: int, trace: Trace
     ) -> tuple[Result, float]:
-        """Judge full candidates, finished-first, record the round; return the best
-        and the judge's score for it (raw noul when available)."""
+        """Judge full candidates, answerable-first then finished-first, record the
+        round; return the best and the judge's score for it (raw noul when
+        available)."""
         cfg = self.config
         verdict = self._verdict(problem, cands, trace)
         ranked = sorted(
             range(len(cands)),
-            key=lambda i: (not cands[i].finished, -verdict.probabilities[i]),
+            key=lambda i: (
+                not has_answer(cands[i].text),
+                not cands[i].finished,
+                -verdict.probabilities[i],
+            ),
         )
         kept = ranked[: cfg.keep_top_k]
         rnd = Round(step=step, prefix="", candidates=cands, verdict=verdict, kept=kept)
@@ -511,6 +541,53 @@ class MetaCog:
                 )
             )
         trace.thinker_calls += n
+        winner = self._race_poll(problem, handles, trace)
+        for h in handles:
+            h.wait()
+        trace.thinker_tokens += sum(h.tokens for h in handles)
+
+        cands = [
+            Candidate(
+                text=h.result.text if h.result is not None else h.text,
+                finished=bool(h.result and h.result.finished),
+                source="greedy" if (cfg.greedy_anchor and i == 0) else "sample",
+            )
+            for i, h in enumerate(handles)
+        ]
+        if winner is not None:
+            verdict = Verdict(
+                probabilities=[1.0 if i == winner else 0.0 for i in range(n)],
+                choice=winner,
+                confidence=cfg.race_confidence,
+            )
+            rnd = Round(step=0, prefix="", candidates=cands, verdict=verdict, kept=[winner])
+            trace.rounds.append(rnd)
+            best = cands[winner]
+            if best.finished:
+                self._verify(problem, best.text, rnd, trace)
+            # A winner that crossed the bar mid-stream still wins even if it
+            # ended truncated — the judge preferred it to everything else.
+            return Result(answer=best.text, finished=best.finished, trace=trace)
+        result, _ = self._pick(problem, cands, step=0, trace=trace)
+        return result
+
+    def _race_poll(
+        self,
+        problem: str,
+        handles: list,
+        trace: Trace,
+        *,
+        cancel_on_deadline: bool = True,
+    ) -> int | None:
+        """Watch the streamed paths, scoring partial text; return the index of a
+        winner crossing ``race_confidence`` (or two finishing on the same
+        answer) and cancel the losers, or None when nothing clears the bar.
+
+        With ``cancel_on_deadline=False`` the deadline only ends winner-polling:
+        unfinished streams run to natural completion instead of being killed,
+        so paths that would have answered correctly are not lost mid-thought."""
+        cfg = self.config
+        n = len(handles)
 
         def answer_key(text: str) -> str:
             if cfg.answer_extractor:
@@ -548,45 +625,54 @@ class MetaCog:
                 break
             time.sleep(cfg.race_poll_seconds)
 
-        if winner is None and time.monotonic() >= deadline:
+        if winner is None and time.monotonic() >= deadline and cancel_on_deadline:
             for h in handles:
                 h.cancel()
         if winner is not None:
             for j, h in enumerate(handles):
                 if j != winner:
                     h.cancel()
+        return winner
+
+    def _race_tail(self, problem: str, n_sampled: int, max_tokens: int, trace: Trace):
+        """Branch-time racing (``race_on_branch``): stream the sampled paths at
+        once, cancel losers when one crosses the bar, return all generations.
+        Unlike ``_race`` this does not auto-pick the winner — the pool is still
+        judged normally, only the generation gets faster and cheaper. When no
+        stream wins before ``race_max_seconds``, polling stops but unfinished
+        streams run to completion rather than being cancelled: the deadline
+        bounds winner-polling, not generation, so paths that would finish
+        correctly still produce candidates."""
+        cfg = self.config
+        gen_stream = getattr(self.thinker, "generate_streaming", None)
+        handles = [
+            gen_stream(
+                problem,
+                "",
+                max_tokens=max_tokens,
+                temperature=cfg.temperature,
+                stop=cfg.stop,
+            )
+            for _ in range(n_sampled)
+        ]
+        trace.thinker_calls += n_sampled
+        self._race_poll(problem, handles, trace, cancel_on_deadline=False)
         for h in handles:
             h.wait()
         trace.thinker_tokens += sum(h.tokens for h in handles)
-
-        cands = [
-            Candidate(
+        return [
+            Generation(
                 text=h.result.text if h.result is not None else h.text,
                 finished=bool(h.result and h.result.finished),
-                source="greedy" if (cfg.greedy_anchor and i == 0) else "sample",
+                tokens=h.tokens,
             )
-            for i, h in enumerate(handles)
+            for h in handles
         ]
-        if winner is not None:
-            verdict = Verdict(
-                probabilities=[1.0 if i == winner else 0.0 for i in range(n)],
-                choice=winner,
-                confidence=cfg.race_confidence,
-            )
-            rnd = Round(step=0, prefix="", candidates=cands, verdict=verdict, kept=[winner])
-            trace.rounds.append(rnd)
-            best = cands[winner]
-            if best.finished:
-                self._verify(problem, best.text, rnd, trace)
-            # A winner that crossed the bar mid-stream still wins even if it
-            # ended truncated — the judge preferred it to everything else.
-            return Result(answer=best.text, finished=best.finished, trace=trace)
-        result, _ = self._pick(problem, cands, step=0, trace=trace)
-        return result
 
     def _best_of_n(self, problem: str) -> Result:
         cfg, trace = self.config, Trace()
         cands: list[Candidate] = []
+        greedy_score: float | None = None
         if cfg.greedy_anchor:
             greedy = self._generate(
                 problem,
@@ -610,13 +696,17 @@ class MetaCog:
                 # Threshold on the raw noul when available: normalised probabilities
                 # degenerate to 1.0 for a single candidate.
                 score_vals = v.raw or v.probabilities
-                # Only finished candidates can carry a final answer — an
-                # unfinished split piece must never short-circuit the cascade.
+                # Only finished candidates that actually answered can
+                # short-circuit the cascade — a reasoning-only path has no
+                # final answer to commit to.
                 choice = max(
-                    (i for i, c in enumerate(cands) if c.finished),
+                    (i for i, c in enumerate(cands) if c.finished and has_answer(c.text)),
                     key=lambda i: score_vals[i],
+                    default=-1,
                 )
-                if score_vals[choice] >= cfg.cascade_confidence:
+                if choice >= 0:
+                    greedy_score = score_vals[choice]
+                if choice >= 0 and score_vals[choice] >= cfg.cascade_confidence:
                     verdict = Verdict(
                         probabilities=v.probabilities,
                         choice=choice,
@@ -635,21 +725,40 @@ class MetaCog:
                     self._verify(problem, best.text, rnd, trace)
                     return Result(answer=best.text, finished=best.finished, trace=trace)
         n_sampled = cfg.n_paths - 1 if cfg.greedy_anchor else cfg.n_paths
-        if n_sampled:
-            gens = self._generate(
-                problem,
-                "",
-                n=n_sampled,
-                max_tokens=cfg.max_tokens,
-                temperature=cfg.temperature,
-                trace=trace,
+        if cfg.branch_min_paths is not None and greedy_score is not None:
+            # Adaptive width: the more the judge doubted the greedy answer, the
+            # wider the search.
+            u = 1.0 - greedy_score
+            n_sampled = max(
+                1,
+                round(cfg.branch_min_paths + u * (n_sampled - cfg.branch_min_paths)),
             )
+        if n_sampled:
+            branch_tokens = cfg.branch_max_tokens or cfg.max_tokens
+            if cfg.race_on_branch and getattr(self.thinker, "generate_streaming", None):
+                gens = self._race_tail(problem, n_sampled, branch_tokens, trace)
+            else:
+                gens = self._generate(
+                    problem,
+                    "",
+                    n=n_sampled,
+                    max_tokens=branch_tokens,
+                    temperature=cfg.temperature,
+                    trace=trace,
+                )
             cands.extend(self._expand(gens, ""))
         verdict = self._verdict(problem, cands, trace)
-        # A finished candidate always outranks an unfinished one (a truncated sample
-        # or an abandoned split-off path has no final answer to commit to).
+        # A candidate that answered always outranks one that is pure reasoning;
+        # among answerable paths a finished one outranks a truncated one (a
+        # truncated sample or abandoned split-off has no final answer to
+        # commit to).
         ranked = sorted(
-            range(len(cands)), key=lambda i: (not cands[i].finished, -verdict.probabilities[i])
+            range(len(cands)),
+            key=lambda i: (
+                not has_answer(cands[i].text),
+                not cands[i].finished,
+                -verdict.probabilities[i],
+            ),
         )
         kept = ranked[: cfg.keep_top_k]
         rnd = Round(step=0, prefix="", candidates=cands, verdict=verdict, kept=kept)
